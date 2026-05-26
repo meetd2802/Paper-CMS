@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, FileText, Trash2, Edit, Download, ArrowLeft, Eye } from 'lucide-react';
 
-const API = 'http://localhost:8000/api';
+const API = import.meta.env.VITE_API_URL;
 
 const ClassView = ({ standard, activeSubject, onSetSubject, onCreatePaper, onEditPaper, token, user, subjects, showAlert, showConfirm, onBack }) => {
   const [papers, setPapers] = useState([]);

@@ -65,6 +65,22 @@ def check_teacher_scope(user: User, standard_id: int, subject: str):
                 detail="Access denied. You are not assigned to this class or subject."
             )
 
+@router.get("", response_model=List[QuestionPaperOut])
+def get_papers(
+    standard_id: Optional[int] = None,
+    subject: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    query = db.query(QuestionPaper)
+    if standard_id is not None:
+        query = query.filter(QuestionPaper.standard_id == standard_id)
+    if subject is not None:
+        query = query.filter(QuestionPaper.subject == subject)
+    if current_user.role == "teacher":
+        query = query.filter(QuestionPaper.created_by == current_user.id)
+    return query.order_by(QuestionPaper.created_at.desc()).all()
+
 @router.get("/standard/{standard_id}", response_model=List[QuestionPaperOut])
 def get_papers_by_standard(
     standard_id: int,

@@ -4,7 +4,7 @@ import {
   FileText, Key, RefreshCw, Upload, Download
 } from 'lucide-react';
 
-const API = 'http://localhost:8000/api';
+const API = import.meta.env.VITE_API_URL;
 
 const QUESTION_TYPES = ['Short Answer', 'Long Answer', 'MCQ', 'Fill in the Blank', 'True/False', 'Match the Following', 'Image Question'];
 
@@ -20,6 +20,12 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
   const [maxMarks, setMaxMarks] = useState(25);
   const [instructions, setInstructions] = useState('');
   const [logoPath, setLogoPath] = useState('/uploads/logo.png');
+
+  // Spacing layout states
+  const [spacingQuestions, setSpacingQuestions] = useState(12);
+  const [spacingSubQuestions, setSpacingSubQuestions] = useState(8);
+  const [spacingSections, setSpacingSections] = useState(14);
+  const [fontSizeBase, setFontSizeBase] = useState(11);
 
   // Questions
   const [questions, setQuestions] = useState([]);
@@ -70,6 +76,14 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
         setMaxMarks(data.max_marks || 25);
         setInstructions(data.instructions || '');
         setLogoPath(data.logo_path || '/uploads/logo.png');
+
+        if (data.structure_json) {
+          const struct = typeof data.structure_json === 'string' ? JSON.parse(data.structure_json) : data.structure_json;
+          if (struct.spacing_questions !== undefined) setSpacingQuestions(struct.spacing_questions);
+          if (struct.spacing_sub_questions !== undefined) setSpacingSubQuestions(struct.spacing_sub_questions);
+          if (struct.spacing_sections !== undefined) setSpacingSections(struct.spacing_sections);
+          if (struct.font_size_base !== undefined) setFontSizeBase(struct.font_size_base);
+        }
 
         // Load questions
         const qRes = await fetch(`${API}/questions/paper/${paperId}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -137,10 +151,40 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
 
   // Sub-questions
   const addSubQuestion = (qIdx) => {
-    updateQuestion(qIdx, 'sub_questions', [
-      ...(questions[qIdx].sub_questions || []),
-      { text: '', answer: '', type: 'text', options: defaultMCQOptions() }
-    ]);
+    const q = questions[qIdx];
+    if (q.question_type === 'MCQ') {
+      const mainOptions = (q.sub_questions || []).map(sq => sq.text || '');
+      const firstSub = {
+        text: q.question_text || 'Sub-question 1',
+        answer: q.answer_text || '',
+        type: 'MCQ',
+        options: mainOptions.length ? mainOptions : defaultMCQOptions(),
+        marks: Number(q.marks) || 1
+      };
+      const secondSub = {
+        text: '',
+        answer: '',
+        type: 'text',
+        options: defaultMCQOptions(),
+        marks: 1
+      };
+      setQuestions(prev => {
+        const updated = [...prev];
+        updated[qIdx] = {
+          ...updated[qIdx],
+          question_type: 'Short Answer',
+          question_text: q.question_text || q.section || 'Choose the correct options:',
+          answer_text: '',
+          sub_questions: [firstSub, secondSub]
+        };
+        return updated;
+      });
+    } else {
+      updateQuestion(qIdx, 'sub_questions', [
+        ...(q.sub_questions || []),
+        { text: '', answer: '', type: 'text', options: defaultMCQOptions() }
+      ]);
+    }
   };
 
   const updateSubQuestion = (qIdx, sIdx, field, value) => {
@@ -197,6 +241,12 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
         max_marks: Number(maxMarks) || 25,
         logo_path: logoPath,
         instructions: instructions,
+        structure_json: {
+          spacing_questions: Number(spacingQuestions),
+          spacing_sub_questions: Number(spacingSubQuestions),
+          spacing_sections: Number(spacingSections),
+          font_size_base: Number(fontSizeBase)
+        }
       };
 
       if (!pid) {
@@ -291,25 +341,147 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
     }
   };
 
-  // Preview
+  const handleFormat = (id, beforeText, afterText, onUpdate) => {
+    const textarea = document.getElementById(id);
+    if (!textarea) return;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const text = textarea.value;
+    const selectedText = text.substring(start, end);
+    const replacement = beforeText + selectedText + afterText;
+    const newValue = text.substring(0, start) + replacement + text.substring(end);
+    
+    onUpdate(newValue);
+    
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + beforeText.length, start + beforeText.length + selectedText.length);
+    }, 0);
+  };
+
+  const FormattingToolbar = ({ textareaId, value, onChange }) => {
+    const mathSymbols = ['√', 'π', 'θ', '±', '×', '÷', '≠', '≤', '≥', '²', '³', '1/3', '1/2', '1/4', 'α', 'β', 'γ', 'Δ', '∠', '∴'];
+
+    return (
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4, padding: '4px 6px', background: '#f8fafc', border: '1px solid var(--border-color)', borderBottom: 'none', borderTopLeftRadius: 6, borderTopRightRadius: 6, alignItems: 'center' }}>
+        <button
+          type="button"
+          className="btn-xs"
+          style={{ fontWeight: 'bold' }}
+          onClick={() => handleFormat(textareaId, '<b>', '</b>', onChange)}
+          title="Bold"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          className="btn-xs"
+          style={{ fontStyle: 'italic' }}
+          onClick={() => handleFormat(textareaId, '<i>', '</i>', onChange)}
+          title="Italic"
+        >
+          I
+        </button>
+        <button
+          type="button"
+          className="btn-xs"
+          onClick={() => handleFormat(textareaId, '<sub>', '</sub>', onChange)}
+          title="Subscript"
+        >
+          X<sub>a</sub>
+        </button>
+        <button
+          type="button"
+          className="btn-xs"
+          onClick={() => handleFormat(textareaId, '<sup>', '</sup>', onChange)}
+          title="Superscript"
+        >
+          X<sup>a</sup>
+        </button>
+        <div style={{ width: 1, height: 16, background: 'var(--border-color)', margin: '0 4px' }} />
+        <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-secondary)', marginRight: 4 }}>Math:</span>
+        {mathSymbols.map(sym => (
+          <button
+            key={sym}
+            type="button"
+            className="btn-xs"
+            onClick={() => handleFormat(textareaId, sym, '', onChange)}
+          >
+            {sym}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  // Debounced Live Preview
   useEffect(() => {
-    if (!paperId) return;
-    const fetchPreview = async () => {
-      setPreviewLoading(true);
-      try {
-        const url = previewType === 'answer'
-          ? `${API}/papers/${paperId}/answer-key-pdf`
-          : `${API}/papers/${paperId}/preview-pdf`;
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok) {
-          const blob = await res.blob();
-          setPreviewUrl(URL.createObjectURL(blob));
+    const delayDebounce = setTimeout(() => {
+      const fetchPreview = async () => {
+        setPreviewLoading(true);
+        try {
+          const payload = {
+            title: title || 'Untitled Paper',
+            subject: subject || 'General',
+            class_name: className || '',
+            date_str: dateStr || '',
+            time_duration: timeDuration || '',
+            max_marks: Number(maxMarks) || 25,
+            logo_path: logoPath || '',
+            instructions: instructions || '',
+            questions: questions.map(q => ({
+              section: q.section || '',
+              question_type: q.question_type || 'Short Answer',
+              question_text: q.question_text || '',
+              answer_text: q.answer_text || '',
+              marks: Number(q.marks) || 0,
+              sub_questions: (q.sub_questions || []).map(sq => ({
+                text: sq.text || '',
+                answer: sq.answer || '',
+                type: sq.type || 'text',
+                options: sq.options || [],
+                marks: Number(sq.marks) || 0
+              }))
+            })),
+            is_answer_key: previewType === 'answer',
+            structure_json: {
+              spacing_questions: Number(spacingQuestions),
+              spacing_sub_questions: Number(spacingSubQuestions),
+              spacing_sections: Number(spacingSections),
+              font_size_base: Number(fontSizeBase)
+            }
+          };
+
+          const res = await fetch(`${API}/papers/preview-pdf`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            const blob = await res.blob();
+            if (previewUrl) {
+              URL.revokeObjectURL(previewUrl);
+            }
+            setPreviewUrl(URL.createObjectURL(blob));
+          }
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setPreviewLoading(false);
         }
-      } catch (e) { console.error(e); }
-      setPreviewLoading(false);
-    };
-    fetchPreview();
-  }, [paperId, refreshPreview, previewType]);
+      };
+      fetchPreview();
+    }, 600);
+
+    return () => clearTimeout(delayDebounce);
+  }, [
+    title, subject, className, dateStr, timeDuration, maxMarks,
+    logoPath, instructions, questions, previewType,
+    spacingQuestions, spacingSubQuestions, spacingSections, fontSizeBase
+  ]);
 
   if (loading) {
     return (
@@ -396,13 +568,57 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
             </div>
             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
               <label className="form-label">Instructions</label>
+              <FormattingToolbar
+                textareaId="instructions-editor"
+                value={instructions}
+                onChange={setInstructions}
+              />
               <textarea
+                id="instructions-editor"
                 className="form-control"
                 rows={3}
+                style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
                 placeholder="General instructions for the paper…"
                 value={instructions}
                 onChange={e => setInstructions(e.target.value)}
               />
+            </div>
+          </div>
+        </div>
+
+        {/* Formatting & Spacing Details */}
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <span className="card-title">Formatting & Spacing (pt)</span>
+          </div>
+          <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Base Font Size:</span>
+                <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{fontSizeBase}pt</span>
+              </label>
+              <input type="range" min={8} max={18} value={fontSizeBase} onChange={e => setFontSizeBase(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--color-primary)' }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Question Spacing:</span>
+                <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{spacingQuestions}pt</span>
+              </label>
+              <input type="range" min={4} max={30} value={spacingQuestions} onChange={e => setSpacingQuestions(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--color-primary)' }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Sub-Question Spacing:</span>
+                <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{spacingSubQuestions}pt</span>
+              </label>
+              <input type="range" min={2} max={20} value={spacingSubQuestions} onChange={e => setSpacingSubQuestions(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--color-primary)' }} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Section Spacing:</span>
+                <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{spacingSections}pt</span>
+              </label>
+              <input type="range" min={4} max={40} value={spacingSections} onChange={e => setSpacingSections(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--color-primary)' }} />
             </div>
           </div>
         </div>
@@ -428,14 +644,7 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                   {/* Question header */}
                   <div style={{ background: 'var(--bg-app)', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--border-color)' }}>
                     <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--color-primary)', minWidth: 28 }}>Q{idx + 1}</span>
-                    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr auto auto', gap: 10, alignItems: 'center' }}>
-                      <input
-                        className="form-control"
-                        style={{ fontSize: 12.5, padding: '5px 9px' }}
-                        placeholder="Section (optional, e.g. Section A)"
-                        value={q.section || ''}
-                        onChange={e => updateQuestion(idx, 'section', e.target.value)}
-                      />
+                    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr auto auto', gap: 10, alignItems: 'center' }}>
                       <select
                         className="form-control"
                         style={{ fontSize: 12.5, padding: '5px 9px' }}
@@ -467,12 +676,30 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                   <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div className="form-group">
                       <label className="form-label" style={{ fontSize: 12 }}>Question Text</label>
+                      <FormattingToolbar
+                        textareaId={`q-text-${idx}`}
+                        value={q.question_text || ''}
+                        onChange={val => updateQuestion(idx, 'question_text', val)}
+                      />
                       <textarea
+                        id={`q-text-${idx}`}
                         className="form-control"
                         rows={2}
+                        style={{ borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
                         placeholder="Enter question here…"
                         value={q.question_text || ''}
                         onChange={e => updateQuestion(idx, 'question_text', e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontSize: 12 }}>Section Header (optional, e.g. Section A, Choose the correct options)</label>
+                      <input
+                        className="form-control"
+                        style={{ fontSize: 12.5 }}
+                        placeholder="e.g. SECTION A or Part 1"
+                        value={q.section || ''}
+                        onChange={e => updateQuestion(idx, 'section', e.target.value)}
                       />
                     </div>
 
@@ -481,20 +708,30 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                       <div>
                         <label className="form-label" style={{ fontSize: 12, marginBottom: 6 }}>MCQ Options</label>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                          {(q.sub_questions?.length ? q.sub_questions : [{ text: '', answer: '', type: 'text', options: defaultMCQOptions() }]).map((sq, si) => (
-                            <div key={si} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', minWidth: 20 }}>
-                                {String.fromCharCode(65 + si)}.
-                              </span>
-                              <input
-                                className="form-control"
-                                style={{ fontSize: 12.5 }}
-                                placeholder={`Option ${String.fromCharCode(65 + si)}`}
-                                value={sq.text || ''}
-                                onChange={e => updateSubQuestion(idx, si, 'text', e.target.value)}
-                              />
-                            </div>
-                          ))}
+                          {Array.from({ length: 4 }).map((_, si) => {
+                            const sq = q.sub_questions?.[si] || { text: '' };
+                            return (
+                              <div key={si} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', minWidth: 20 }}>
+                                  {String.fromCharCode(65 + si)}.
+                                </span>
+                                <input
+                                  className="form-control"
+                                  style={{ fontSize: 12.5 }}
+                                  placeholder={`Option ${String.fromCharCode(65 + si)}`}
+                                  value={sq.text || ''}
+                                  onChange={e => {
+                                    const newSubs = [...(q.sub_questions || [])];
+                                    while (newSubs.length <= si) {
+                                      newSubs.push({ text: '', answer: '', type: 'text', options: defaultMCQOptions() });
+                                    }
+                                    newSubs[si] = { ...newSubs[si], text: e.target.value };
+                                    updateQuestion(idx, 'sub_questions', newSubs);
+                                  }}
+                                />
+                              </div>
+                            );
+                          })}
                         </div>
                         <div style={{ marginTop: 8 }}>
                           <label className="form-label" style={{ fontSize: 12 }}>Correct Answer</label>
@@ -528,18 +765,98 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                           <div style={{ background: 'var(--bg-app)', borderRadius: 8, padding: 12 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>Sub-Questions</div>
                             {q.sub_questions.map((sq, si) => (
-                              <div key={si} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+                              <div key={si} style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'flex-start' }}>
                                 <span style={{ fontSize: 12, fontWeight: 700, minWidth: 22, paddingTop: 8, color: 'var(--color-primary)' }}>
                                   {si + 1}.
                                 </span>
-                                <textarea
-                                  className="form-control"
-                                  rows={2}
-                                  style={{ fontSize: 12.5 }}
-                                  placeholder="Sub-question text…"
-                                  value={sq.text || ''}
-                                  onChange={e => updateSubQuestion(idx, si, 'text', e.target.value)}
-                                />
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                                  <FormattingToolbar
+                                    textareaId={`sq-text-${idx}-${si}`}
+                                    value={sq.text || ''}
+                                    onChange={val => updateSubQuestion(idx, si, 'text', val)}
+                                  />
+                                  <textarea
+                                    id={`sq-text-${idx}-${si}`}
+                                    className="form-control"
+                                    rows={2}
+                                    style={{ fontSize: 12.5, borderTopLeftRadius: 0, borderTopRightRadius: 0 }}
+                                    placeholder="Sub-question text…"
+                                    value={sq.text || ''}
+                                    onChange={e => updateSubQuestion(idx, si, 'text', e.target.value)}
+                                  />
+                                  
+                                  {/* MCQ Options for Sub-Question */}
+                                  {sq.type === 'MCQ' && (
+                                    <>
+                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8, paddingLeft: 12, borderLeft: '2px solid var(--border-color)' }}>
+                                        {(sq.options || defaultMCQOptions()).map((opt, optIdx) => (
+                                          <div key={optIdx} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                                              {String.fromCharCode(97 + optIdx)}.
+                                            </span>
+                                            <input
+                                              className="form-control"
+                                              style={{ fontSize: 12, padding: '4px 8px' }}
+                                              placeholder={`Option ${String.fromCharCode(97 + optIdx)}`}
+                                              value={opt || ''}
+                                              onChange={e => {
+                                                const newOpts = [...(sq.options || defaultMCQOptions())];
+                                                newOpts[optIdx] = e.target.value;
+                                                updateSubQuestion(idx, si, 'options', newOpts);
+                                              }}
+                                            />
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <div style={{ marginTop: 6, paddingLeft: 12, borderLeft: '2px solid var(--border-color)' }}>
+                                        <input
+                                          className="form-control"
+                                          style={{ fontSize: 11.5, padding: '4px 8px' }}
+                                          placeholder="Correct Answer (e.g. a)"
+                                          value={sq.answer || ''}
+                                          onChange={e => updateSubQuestion(idx, si, 'answer', e.target.value)}
+                                        />
+                                      </div>
+                                    </>
+                                  )}
+                                  
+                                  {/* Answer Key Points for Text type */}
+                                  {sq.type !== 'MCQ' && (
+                                    <div style={{ marginTop: 6 }}>
+                                      <input
+                                        className="form-control"
+                                        style={{ fontSize: 11.5, padding: '4px 8px' }}
+                                        placeholder="Answer / Key points (for answer key PDF)…"
+                                        value={sq.answer || ''}
+                                        onChange={e => updateSubQuestion(idx, si, 'answer', e.target.value)}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 100, marginTop: 4 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', minWidth: 35 }}>Marks:</label>
+                                    <input
+                                      type="number"
+                                      className="form-control"
+                                      style={{ width: 45, fontSize: 12, padding: '4px 6px' }}
+                                      min={0}
+                                      value={sq.marks || 0}
+                                      onChange={e => updateSubQuestion(idx, si, 'marks', Number(e.target.value))}
+                                    />
+                                  </div>
+                                  <select
+                                    className="form-control"
+                                    style={{ fontSize: 11, padding: '2px 4px', height: 24 }}
+                                    value={sq.type || 'text'}
+                                    onChange={e => updateSubQuestion(idx, si, 'type', e.target.value)}
+                                  >
+                                    <option value="text">Text type</option>
+                                    <option value="MCQ">MCQ type</option>
+                                  </select>
+                                </div>
+                                
                                 <button className="btn-icon danger" style={{ marginTop: 4 }} onClick={() => removeSubQuestion(idx, si)}>
                                   <Trash2 size={13} />
                                 </button>
@@ -548,15 +865,16 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                           </div>
                         )}
 
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          style={{ alignSelf: 'flex-start', fontSize: 12 }}
-                          onClick={() => addSubQuestion(idx)}
-                        >
-                          <Plus size={12} /> Add Sub-Question
-                        </button>
                       </>
                     )}
+
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ alignSelf: 'flex-start', fontSize: 12, marginTop: 8 }}
+                      onClick={() => addSubQuestion(idx)}
+                    >
+                      <Plus size={12} /> Add Sub-Question
+                    </button>
                   </div>
                 </div>
               ))}
@@ -572,53 +890,51 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
       </div>
 
       {/* Right: Preview pane */}
-      {paperId && (
-        <div style={{ width: 420, borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'white' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Preview</span>
-            <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-              <button
-                className={`btn btn-sm ${previewType === 'paper' ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setPreviewType('paper')}
-              >
-                <FileText size={13} /> Paper
-              </button>
-              <button
-                className={`btn btn-sm ${previewType === 'answer' ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setPreviewType('answer')}
-              >
-                <Key size={13} /> Answer Key
-              </button>
-              <button
-                className="btn-icon"
-                title="Refresh preview"
-                onClick={() => setRefreshPreview(v => v + 1)}
-              >
-                <RefreshCw size={14} />
-              </button>
-            </div>
-          </div>
-          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            {previewLoading ? (
-              <div style={{ textAlign: 'center' }}>
-                <span className="spinner dark" />
-                <p style={{ marginTop: 10, fontSize: 13, color: 'var(--text-muted)' }}>Generating preview…</p>
-              </div>
-            ) : previewUrl ? (
-              <iframe
-                src={previewUrl}
-                style={{ width: '100%', height: '100%', border: 'none' }}
-                title="PDF Preview"
-              />
-            ) : (
-              <div className="empty-state">
-                <FileText size={40} />
-                <p>Save paper to see preview</p>
-              </div>
-            )}
+      <div style={{ width: 420, borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'white' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 600 }}>Preview</span>
+          <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+            <button
+              className={`btn btn-sm ${previewType === 'paper' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setPreviewType('paper')}
+            >
+              <FileText size={13} /> Paper
+            </button>
+            <button
+              className={`btn btn-sm ${previewType === 'answer' ? 'btn-primary' : 'btn-ghost'}`}
+              onClick={() => setPreviewType('answer')}
+            >
+              <Key size={13} /> Answer Key
+            </button>
+            <button
+              className="btn-icon"
+              title="Refresh preview"
+              onClick={() => setRefreshPreview(v => v + 1)}
+            >
+              <RefreshCw size={14} />
+            </button>
           </div>
         </div>
-      )}
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {previewLoading ? (
+            <div style={{ textAlign: 'center' }}>
+              <span className="spinner dark" />
+              <p style={{ marginTop: 10, fontSize: 13, color: 'var(--text-muted)' }}>Generating preview…</p>
+            </div>
+          ) : previewUrl ? (
+            <iframe
+              src={previewUrl}
+              style={{ width: '100%', height: '100%', border: 'none' }}
+              title="PDF Preview"
+            />
+          ) : (
+            <div className="empty-state">
+              <FileText size={40} />
+              <p>Type paper details to see preview</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

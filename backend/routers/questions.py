@@ -30,6 +30,20 @@ def check_teacher_scope(user: User, paper: QuestionPaper):
                 detail="Access denied. This paper's class or subject is not assigned to you."
             )
 
+@router.get("/paper/{paper_id}", response_model=List[QuestionOut])
+def get_questions_by_paper(
+    paper_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    paper = db.query(QuestionPaper).filter(QuestionPaper.id == paper_id).first()
+    if not paper:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question paper not found")
+        
+    check_teacher_scope(current_user, paper)
+    
+    return db.query(Question).filter(Question.paper_id == paper_id).order_by(Question.display_order.asc()).all()
+
 @router.post("/paper/{paper_id}", response_model=QuestionOut, status_code=status.HTTP_201_CREATED)
 def add_question(
     paper_id: int,

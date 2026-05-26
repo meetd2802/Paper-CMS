@@ -8,7 +8,7 @@ import PaperEditor from './components/PaperEditor';
 import TeacherManagement from './components/TeacherManagement';
 import SubjectManagement from './components/SubjectManagement';
 
-const API = 'http://localhost:8000/api';
+const API = import.meta.env.VITE_API_URL;
 
 // Custom Alert Modal
 const AlertModal = ({ alert, onClose }) => {

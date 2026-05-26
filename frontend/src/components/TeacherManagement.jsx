@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserPlus, Trash2, Edit, X, Check, Mail, Users } from 'lucide-react';
 
-const API = 'http://localhost:8000/api';
+const API = import.meta.env.VITE_API_URL;
 
 const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm }) => {
   const [teachers, setTeachers] = useState([]);
@@ -33,7 +33,11 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
   useEffect(() => { fetchTeachers(); }, []);
 
   const toggleStd = (id, arr, setArr) => {
-    setArr(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    const numId = Number(id);
+    setArr(prev => {
+      const nums = prev.map(x => Number(x));
+      return nums.includes(numId) ? nums.filter(x => x !== numId) : [...nums, numId];
+    });
   };
 
   const toggleSub = (name, arr, setArr) => {
@@ -61,7 +65,7 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
       setAddSubjects([]);
       setShowAddForm(false);
       fetchTeachers();
-      showAlert('Success', `Teacher "${data.email}" onboarded. Temporary password: school@123`, 'success');
+      showAlert('Success', `Teacher "${data.email}" onboarded. Temporary password: Test@123`, 'success');
     } catch (err) {
       showAlert('Error', err.message, 'error');
     } finally {
@@ -72,7 +76,7 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
   const openEdit = (teacher) => {
     setEditTeacher(teacher);
     setEditEmail(teacher.email);
-    setEditStandardIds(teacher.assignments?.map(a => a.standard_id) || []);
+    setEditStandardIds(teacher.assignments?.map(a => Number(a.standard_id)) || []);
     setEditSubjects([...new Set(teacher.assignments?.map(a => a.subject) || [])]);
   };
 
@@ -121,8 +125,8 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
   };
 
   const getTeacherClasses = (teacher) => {
-    const ids = [...new Set(teacher.assignments?.map(a => a.standard_id) || [])];
-    return ids.map(id => standards.find(s => s.id === id)?.name).filter(Boolean);
+    const ids = [...new Set(teacher.assignments?.map(a => Number(a.standard_id)) || [])];
+    return ids.map(id => standards.find(s => Number(s.id) === id)?.name).filter(Boolean);
   };
 
   const getTeacherSubjects = (teacher) => {
@@ -183,7 +187,7 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
 
       {/* Add Form */}
       {showAddForm && (
-        <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card" style={{ marginBottom: 20, overflow: 'visible' }}>
           <div className="card-header">
             <span className="card-title">Onboard New Teacher</span>
           </div>
@@ -219,7 +223,7 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
               />
             </div>
             <div style={{ marginTop: 8, padding: '8px 12px', background: 'var(--color-primary-bg)', borderRadius: 8, fontSize: 12.5, color: 'var(--color-primary)' }}>
-              Default password will be <strong>school@123</strong>. Teacher will be prompted to change on first login.
+              Default password will be <strong>Test@123</strong>. Teacher will be prompted to change on first login.
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-secondary" onClick={() => setShowAddForm(false)}>Cancel</button>
@@ -250,6 +254,7 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
             <thead>
               <tr>
                 <th>Email</th>
+                <th>Password Status</th>
                 <th>Classes</th>
                 <th>Subjects</th>
                 <th style={{ width: 90 }}>Actions</th>
@@ -259,6 +264,17 @@ const TeacherManagement = ({ standards, subjects, token, showAlert, showConfirm 
               {teachers.map(teacher => (
                 <tr key={teacher.id}>
                   <td style={{ fontWeight: 600 }}>{teacher.email}</td>
+                  <td>
+                    {teacher.must_reset_password ? (
+                      <span className="badge" style={{ background: '#fee2e2', color: '#ef4444', border: '1px solid #fca5a5' }}>
+                        Default Password (Not Updated)
+                      </span>
+                    ) : (
+                      <span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7' }}>
+                        Changed
+                      </span>
+                    )}
+                  </td>
                   <td>
                     <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                       {getTeacherClasses(teacher).map(cls => (

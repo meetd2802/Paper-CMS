@@ -2,12 +2,38 @@ import os
 import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Frame, PageTemplate
+from reportlab.platypus.doctemplate import _doNothing, BaseDocTemplate
+from reportlab.pdfgen import canvas
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib import colors
 from reportlab.platypus.flowables import HRFlowable
+
+class ZeroPaddingDocTemplate(SimpleDocTemplate):
+    def build(self, flowables, onFirstPage=_doNothing, onLaterPages=_doNothing, canvasmaker=canvas.Canvas):
+        self._calc()
+        frameT = Frame(
+            self.leftMargin, 
+            self.bottomMargin, 
+            self.width, 
+            self.height, 
+            id='normal',
+            leftPadding=0,
+            rightPadding=0,
+            topPadding=0,
+            bottomPadding=0
+        )
+        self.addPageTemplates([
+            PageTemplate(id='First', frames=frameT, onPage=onFirstPage, pagesize=self.pagesize),
+            PageTemplate(id='Later', frames=frameT, onPage=onLaterPages, pagesize=self.pagesize)
+        ])
+        if onFirstPage is _doNothing and hasattr(self, 'onFirstPage'):
+            self.pageTemplates[0].beforeDrawPage = self.onFirstPage
+        if onLaterPages is _doNothing and hasattr(self, 'onLaterPages'):
+            self.pageTemplates[1].beforeDrawPage = self.onLaterPages
+        BaseDocTemplate.build(self, flowables, canvasmaker=canvasmaker)
 
 try:
     from backend.config import FONTS_DIR, BASE_DIR
@@ -19,6 +45,11 @@ DEVANAGARI_REGULAR = os.path.join(FONTS_DIR, "NotoSansDevanagari-Regular.ttf")
 DEVANAGARI_BOLD = os.path.join(FONTS_DIR, "NotoSansDevanagari-Bold.ttf")
 GUJARATI_REGULAR = os.path.join(FONTS_DIR, "NotoSansGujarati-Regular.ttf")
 GUJARATI_BOLD = os.path.join(FONTS_DIR, "NotoSansGujarati-Bold.ttf")
+NOTOSANS_REGULAR = os.path.join(FONTS_DIR, "NotoSans-Regular.ttf")
+NOTOSANS_BOLD = os.path.join(FONTS_DIR, "NotoSans-Bold.ttf")
+
+BASE_FONT = "Times-Roman"
+BASE_FONT_BOLD = "Times-Bold"
 
 try:
     pdfmetrics.registerFont(TTFont("Devanagari", DEVANAGARI_REGULAR))
@@ -28,6 +59,11 @@ try:
     
     pdfmetrics.registerFontFamily("Devanagari", normal="Devanagari", bold="Devanagari-Bold")
     pdfmetrics.registerFontFamily("Gujarati", normal="Gujarati", bold="Gujarati-Bold")
+
+    if os.path.exists(NOTOSANS_REGULAR) and os.path.exists(NOTOSANS_BOLD):
+        pdfmetrics.registerFont(TTFont("NotoSans", NOTOSANS_REGULAR))
+        pdfmetrics.registerFont(TTFont("NotoSans-Bold", NOTOSANS_BOLD))
+        pdfmetrics.registerFontFamily("NotoSans", normal="NotoSans", bold="NotoSans-Bold")
 except Exception as e:
     print(f"Warning: Fonts could not be registered: {e}")
 
@@ -50,6 +86,14 @@ def process_unicode_tags(text: str, is_bold: bool = False) -> str:
             in_bold = is_bold
             processed_parts.append(part)
         else:
+            font_ns = "NotoSans-Bold" if in_bold else "NotoSans"
+            # Wrap math symbols, Greek, fractions, superscripts in NotoSans
+            part = re.sub(
+                r'([\u2200-\u22FF\u0370-\u03FF\u2070-\u209F\u2150-\u218F\u25A0-\u25FF\u27C0-\u27EF\u2980-\u29FF]+)',
+                rf'<font name="{font_ns}">\1</font>',
+                part
+            )
+            
             font_guj = "Gujarati-Bold" if in_bold else "Gujarati"
             part = re.sub(r'([\u0A80-\u0AFF\u200C\u200D]+)', rf'<font name="{font_guj}">\1</font>', part)
             
@@ -68,31 +112,42 @@ def parse_html_to_flowables(html_text: str, style) -> list:
     html_text = html_text.replace("<strong>", "<b>").replace("</strong>", "</b>")
     html_text = html_text.replace("<em>", "<i>").replace("</em>", "</i>")
     
-    # Simple regex to check for list items
-    items = re.findall(r'<li>(.*?)</li>', html_text, re.DOTALL)
-    if items:
-        intro_match = re.search(r'^(.*?)(?:<ol>|<ul>)', html_text, re.DOTALL)
-        if intro_match:
-            intro_text = intro_match.group(1).strip()
-            intro_text = re.sub(r'<p>|</p>', '', intro_text)
-            if intro_text:
-                flowables.append(Paragraph(process_unicode_tags(intro_text), style))
-                flowables.append(Spacer(1, 4))
+    # We can split the HTML text by list blocks: <ol>...</ol> and <ul>...</ul>
+    # This preserves paragraphs before/after/between lists.
+    parts = re.split(r'(<ol>.*?</ol>|<ul>.*?</ul>)', html_text, flags=re.DOTALL)
+    
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
         
-        for i, item in enumerate(items, 1):
-            item_text = item.strip()
-            bullet_text = f"{i}. {item_text}"
-            flowables.append(Paragraph(process_unicode_tags(bullet_text), style))
-            flowables.append(Spacer(1, 4))
-    else:
-        paragraphs = re.split(r'</p>|<p>', html_text)
-        for p in paragraphs:
-            p_text = p.strip()
-            if p_text:
-                p_text = re.sub(r'<br\s*/?>', '\n', p_text)
-                flowables.append(Paragraph(process_unicode_tags(p_text), style))
-                flowables.append(Spacer(1, 6))
-                
+        if part.startswith("<ol>"):
+            items = re.findall(r'<li>(.*?)</li>', part, re.DOTALL)
+            for i, item in enumerate(items, 1):
+                item_text = item.strip()
+                item_text = re.sub(r'<p>|</p>', '', item_text)
+                bullet_text = f"{i}. {item_text}"
+                flowables.append(Paragraph(process_unicode_tags(bullet_text), style))
+                flowables.append(Spacer(1, 4))
+        elif part.startswith("<ul>"):
+            items = re.findall(r'<li>(.*?)</li>', part, re.DOTALL)
+            for item in items:
+                item_text = item.strip()
+                item_text = re.sub(r'<p>|</p>', '', item_text)
+                # Use bullet symbol • (entity &bull;)
+                bullet_text = f"&bull; {item_text}"
+                flowables.append(Paragraph(process_unicode_tags(bullet_text), style))
+                flowables.append(Spacer(1, 4))
+        else:
+            # Paragraphs
+            paragraphs = re.split(r'</p>|<p>', part)
+            for p in paragraphs:
+                p_text = p.strip()
+                if p_text:
+                    p_text = re.sub(r'<br\s*/?>', '\n', p_text)
+                    flowables.append(Paragraph(process_unicode_tags(p_text), style))
+                    flowables.append(Spacer(1, 6))
+                    
     return flowables
 
 def draw_page_decorations(canvas, doc):
@@ -102,9 +157,18 @@ def draw_page_decorations(canvas, doc):
     canvas.setLineWidth(1.0)
     canvas.rect(20, 20, 595.27 - 40, 841.89 - 40)
     
+    # Print the active frame coordinates for debugging
+    try:
+        frame_log = f"ACTIVE TEMPLATE FRAME: x1={doc.pageTemplate.frames[0]._x1} width={doc.pageTemplate.frames[0]._width}\n"
+        with open('/Users/meet/.gemini/antigravity/brain/6ab47fb8-ccea-40dd-adb0-87dead90115e/scratch/margins.txt', 'a') as debug_f:
+            debug_f.write(frame_log)
+        print("ACTIVE TEMPLATE FRAME: x1 =", doc.pageTemplate.frames[0]._x1, "width =", doc.pageTemplate.frames[0]._width)
+    except Exception as e:
+        print("Frame inspect error:", e)
+        
     # 2. Page numbering in bottom right margin
-    canvas.setFont("Helvetica", 9)
-    canvas.drawRightString(575.27 - 16, 30, f"Page {doc.page}")
+    canvas.setFont("Times-Roman", 9)
+    canvas.drawRightString(559.27, 30, f"Page {doc.page}")
     canvas.restoreState()
 
 def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict = None) -> bytes:
@@ -112,7 +176,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     
     # Page setup
     # Margins are set to 36pt (leaving 16pt space inside the 20pt border)
-    doc = SimpleDocTemplate(
+    doc = ZeroPaddingDocTemplate(
         pdf_buffer,
         pagesize=A4,
         leftMargin=36,
@@ -120,23 +184,26 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
         topMargin=36,
         bottomMargin=36
     )
+    with open('/Users/meet/.gemini/antigravity/brain/6ab47fb8-ccea-40dd-adb0-87dead90115e/scratch/margins.txt', 'a') as debug_f:
+        debug_f.write(f"CALL MARGINS: left={doc.leftMargin} right={doc.rightMargin} width={doc.width}\n")
+    print("DEBUG MARGINS: left =", doc.leftMargin, "right =", doc.rightMargin, "width =", doc.width)
     
     styles = getSampleStyleSheet()
     
     # Extracted layout values or defaults
     layout = structure_json or (paper.structure_json if hasattr(paper, 'structure_json') else None) or {}
     font_size_base = layout.get("font_size_base", 11)
-    font_size_title = layout.get("font_size_title", 28)
-    font_size_subtitle = layout.get("font_size_subtitle", 16)
-    font_size_metadata = layout.get("font_size_metadata", 13)
+    font_size_title = layout.get("font_size_title", 22)
+    font_size_subtitle = layout.get("font_size_subtitle", 14)
+    font_size_metadata = layout.get("font_size_metadata", 12)
     spacing_questions = layout.get("spacing_questions", 12)
     spacing_sub_questions = layout.get("spacing_sub_questions", 8)
     spacing_sections = layout.get("spacing_sections", 14)
     
-    # Base typography (Helvetica to support English, unicode tags for Hindi/Gujarati)
+    # Base typography (NotoSans/Helvetica to support English, unicode tags for Hindi/Gujarati)
     style_school = ParagraphStyle(
         'SchoolTitle',
-        fontName='Helvetica-Bold',
+        fontName=BASE_FONT_BOLD,
         fontSize=font_size_title,
         leading=font_size_title + 4,
         alignment=1, # Centered
@@ -144,7 +211,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     
     style_title = ParagraphStyle(
         'PaperTitle',
-        fontName='Helvetica-Bold',
+        fontName=BASE_FONT_BOLD,
         fontSize=font_size_subtitle,
         leading=font_size_subtitle + 4,
         alignment=1, # Centered
@@ -152,7 +219,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     
     style_meta = ParagraphStyle(
         'MetadataLeft',
-        fontName='Helvetica-Bold',
+        fontName=BASE_FONT_BOLD,
         fontSize=font_size_metadata,
         leading=font_size_metadata + 4,
         alignment=0, # Left
@@ -160,7 +227,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     
     style_meta_center = ParagraphStyle(
         'MetadataCenter',
-        fontName='Helvetica-Bold',
+        fontName=BASE_FONT_BOLD,
         fontSize=font_size_metadata,
         leading=font_size_metadata + 4,
         alignment=1, # Center
@@ -168,7 +235,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     
     style_meta_right = ParagraphStyle(
         'MetadataRight',
-        fontName='Helvetica-Bold',
+        fontName=BASE_FONT_BOLD,
         fontSize=font_size_metadata,
         leading=font_size_metadata + 4,
         alignment=2, # Right
@@ -176,28 +243,28 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     
     style_instructions = ParagraphStyle(
         'InstructionsStyle',
-        fontName='Helvetica',
+        fontName=BASE_FONT,
         fontSize=font_size_base,
         leading=font_size_base + 4,
     )
     
     style_section = ParagraphStyle(
         'SectionHeaderStyle',
-        fontName='Helvetica-Bold',
+        fontName=BASE_FONT_BOLD,
         fontSize=font_size_base + 1,
         leading=font_size_base + 5,
     )
     
     style_question = ParagraphStyle(
         'QuestionTextStyle',
-        fontName='Helvetica',
+        fontName=BASE_FONT,
         fontSize=font_size_base,
         leading=font_size_base + 4,
     )
     
     style_marks = ParagraphStyle(
         'MarksStyle',
-        fontName='Helvetica-Bold',
+        fontName=BASE_FONT_BOLD,
         fontSize=font_size_base,
         leading=font_size_base + 4,
         alignment=2, # Right-aligned
@@ -205,14 +272,15 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     
     style_opt = ParagraphStyle(
         'MCQOptionStyle',
-        fontName='Helvetica',
+        fontName=BASE_FONT,
         fontSize=font_size_base,
         leading=font_size_base + 4,
+        leftIndent=15,
     )
     
     style_sol = ParagraphStyle(
         'AnswerKeySolStyle',
-        fontName='Helvetica',
+        fontName=BASE_FONT,
         fontSize=font_size_base,
         leading=font_size_base + 4,
         textColor=colors.HexColor("#1e3a8a"), # Slate Indigo
@@ -239,7 +307,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     if logo_file:
         try:
             from reportlab.platypus import Image
-            logo_img = Image(logo_file, width=60, height=60)
+            logo_img = Image(logo_file, width=65, height=65)
             logo_img.hAlign = 'RIGHT'
         except Exception as img_err:
             print("Error loading logo image:", img_err)
@@ -249,47 +317,53 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     title_text = f"{paper.title} - ANSWER KEY" if is_answer_key else paper.title
     title_para = Paragraph(process_unicode_tags(title_text), style_title)
     
-    # Header columns: empty spacer on left to balance the logo on right
+    # 3-column layout to center titles perfectly while keeping the logo on the far right
+    # colWidths sum to 523.27pt (A4 width 595.27 - 72pt margins)
     header_table = Table(
         [
             [Spacer(1, 1), [school_para, Spacer(1, 4), title_para], logo_img if logo_img else Spacer(1, 1)]
         ],
-        colWidths=[70, 415.27, 70]
+        colWidths=[65, 393.27, 65]
     )
+    header_table.hAlign = 'LEFT'
     header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('LEFTPADDING', (0, 0), (-1, -1), 0),
         ('RIGHTPADDING', (0, 0), (-1, -1), 0),
         ('TOPPADDING', (0, 0), (-1, -1), 0),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
     ]))
     story.append(header_table)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 4))
     
     # 2. Metadata Block (A4 border-to-border layout)
-    # Col widths are configured to span full content area 555.27pt
-    # Col 1: 100pt, Col 2: 170pt, Col 3: 285.27pt
-    meta_date_time = f"DATE: {paper.date_str or ''} &nbsp;&nbsp; TIME: {paper.time_duration or ''} &nbsp;&nbsp; Marks: {paper.max_marks}"
-    
+    # Row 1: CLASS : <class> (left), SUB : <subject> (center), DATE : <date> (right)
+    # Row 2: TIME : <time> (left), MM : <marks> (right)
+    # Col widths sum to 523.27pt: [150, 223.27, 150]
     meta_data = [
         [
-            Paragraph(process_unicode_tags(f"CLASS: {paper.class_name}"), style_meta),
-            Paragraph(process_unicode_tags(f"SUB: {paper.subject}"), style_meta_center),
-            Paragraph(process_unicode_tags(meta_date_time), style_meta_right)
+            Paragraph(process_unicode_tags(f"CLASS : {paper.class_name}"), style_meta),
+            Paragraph(process_unicode_tags(f"SUB : {paper.subject}"), style_meta_center),
+            Paragraph(process_unicode_tags(f"DATE : {paper.date_str or ''}"), style_meta)
+        ],
+        [
+            Paragraph(process_unicode_tags(f"TIME : {paper.time_duration or ''}"), style_meta),
+            Spacer(1, 1),
+            Paragraph(process_unicode_tags(f"MM : {paper.max_marks}"), style_meta)
         ]
     ]
-    meta_table = Table(meta_data, colWidths=[100, 170, 285.27])
+    meta_table = Table(meta_data, colWidths=[150, 223.27, 150])
+    meta_table.hAlign = 'LEFT'
     meta_table.setStyle(TableStyle([
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('TOPPADDING', (0, 0), (-1, -1), 4),
-        ('LEFTPADDING', (0, 0), (0, 0), 16),    # Col 1 aligns to doc margin
-        ('RIGHTPADDING', (0, 0), (0, 0), 0),
-        ('LEFTPADDING', (1, 0), (1, 0), 0),
-        ('RIGHTPADDING', (1, 0), (1, 0), 0),
-        ('LEFTPADDING', (2, 0), (2, 0), 0),
-        ('RIGHTPADDING', (2, 0), (2, 0), 16),   # Col 3 aligns to right doc margin
-        ('LINEBELOW', (0, 0), (-1, 0), 2.5, colors.black), # Full width border line
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+        ('ALIGN', (2, 0), (2, -1), 'LEFT'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING', (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('LINEBELOW', (0, 1), (-1, 1), 1.2, colors.black), # Thin clean border line below the metadata block
     ]))
     story.append(meta_table)
     story.append(Spacer(1, 10))
@@ -306,6 +380,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     sorted_questions = sorted(questions_list, key=lambda x: x.display_order if x.display_order is not None else 0)
     
     current_section = None
+    q_counter = 1
     for q in sorted_questions:
         # Check Section header
         if q.section and q.section.strip() != current_section:
@@ -319,18 +394,30 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
         
         # Parse question text
         question_text_clean = q.question_text or ""
-        # Strip outer paragraph tags if any to prevent styling override
-        question_text_clean = re.sub(r'^<p>|</p>$', '', question_text_clean)
         
-        question_para = Paragraph(process_unicode_tags(question_text_clean), style_question)
+        # Prepend Q{q_counter}. if it doesn't already start with Q{number}
+        text_without_tags = re.sub(r'<[^>]*>', '', question_text_clean).strip()
+        if not re.match(r'^Q\d+\s*[\.\)]', text_without_tags):
+            if question_text_clean.startswith("<p>"):
+                question_text_clean = f"<p>Q{q_counter}. " + question_text_clean[3:]
+            else:
+                question_text_clean = f"Q{q_counter}. " + question_text_clean
+                
+        question_flowables = parse_html_to_flowables(question_text_clean, style_question)
+        if not question_flowables:
+            question_flowables = [Paragraph(f"Q{q_counter}. ", style_question)]
+            
+        q_counter += 1
+            
         marks_text = f"({q.marks})" if (q.marks is not None and q.marks > 0) else ""
         marks_para = Paragraph(marks_text, style_marks)
         
         # Table aligning question text to left and marks to right margin
         q_header_table = Table(
-            [[question_para, marks_para]],
-            colWidths=[515.27, 40]
+            [[question_flowables, marks_para]],
+            colWidths=[483.27, 40]
         )
+        q_header_table.hAlign = 'LEFT'
         q_header_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -346,43 +433,120 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
             q_flowables.append(Spacer(1, 4))
             q_flowables.append(Paragraph(process_unicode_tags(f"<b>Sol:</b> {ans_clean}"), style_sol))
             
-        # Display sub-questions if present
-        sub_questions_list = q.sub_questions if isinstance(q.sub_questions, list) else []
-        for idx, sub in enumerate(sub_questions_list, 1):
-            sub_flowables = []
-            sub_text = sub.get("text", "").strip()
-            
-            # Check for sequential numbering pattern prefix
-            prefix_pattern = r'^(\d+[\.\)]|[a-zA-Z][\.\)]|\([a-zA-Z0-9]\)|[\u0AE6-\u0AEF]+[\.\)])'
-            if not re.match(prefix_pattern, sub_text):
-                # Automatically prepend sequential sub-question number
-                sub_text = f"{idx}. {sub_text}"
+        # Display MCQ options if main question is MCQ
+        is_main_mcq = getattr(q, 'question_type', '') == 'MCQ' or getattr(q, 'type', '') == 'MCQ'
+        if is_main_mcq:
+            sub_questions_list = q.sub_questions if isinstance(q.sub_questions, list) else []
+            options = []
+            for sub in sub_questions_list[:4]:
+                if isinstance(sub, dict):
+                    opt_text = sub.get("text", "").strip()
+                else:
+                    opt_text = getattr(sub, "text", "").strip()
+                options.append(opt_text)
                 
-            sub_para = Paragraph(process_unicode_tags(sub_text), style_question)
-            sub_flowables.append(sub_para)
-            
-            # Render MCQ options if present
-            options = sub.get("options", [])
-            if options:
-                prefixes = ["A. ", "B. ", "C. ", "D. "]
+            while len(options) < 4:
+                options.append("")
+                
+            non_empty_options = [o for o in options if o]
+            if non_empty_options:
+                prefixes = ["a. ", "b. ", "c. ", "d. "]
                 formatted_opts = []
                 for o_idx, opt in enumerate(options):
-                    opt_str = str(opt).strip()
-                    if not re.match(r'^[A-D]\s*[\.\)]', opt_str):
+                    opt_str = opt
+                    if opt_str and not re.match(r'^[A-Da-d]\s*[\.\)]', opt_str):
                         opt_str = prefixes[o_idx] + opt_str
                     formatted_opts.append(opt_str)
                     
                 max_len = max(len(o) for o in formatted_opts) if formatted_opts else 0
-                sub_flowables.append(Spacer(1, 4))
+                q_flowables.append(Spacer(1, 4))
                 if max_len < 15:
-                    opt_table = Table([[Paragraph(process_unicode_tags(o), style_opt) for o in formatted_opts]], colWidths=[120]*4)
+                    opt_table = Table([[Paragraph(process_unicode_tags(o), style_opt) for o in formatted_opts]], colWidths=[115]*4)
                 elif max_len < 30:
                     opt_table = Table([
                         [Paragraph(process_unicode_tags(formatted_opts[0]), style_opt), Paragraph(process_unicode_tags(formatted_opts[1]), style_opt)],
                         [Paragraph(process_unicode_tags(formatted_opts[2]), style_opt), Paragraph(process_unicode_tags(formatted_opts[3]), style_opt)]
-                    ], colWidths=[240, 240])
+                    ], colWidths=[230, 230])
                 else:
-                    opt_table = Table([[Paragraph(process_unicode_tags(o), style_opt)] for o in formatted_opts], colWidths=[480])
+                    opt_table = Table([[Paragraph(process_unicode_tags(o), style_opt)] for o in formatted_opts], colWidths=[460])
+                
+                opt_table.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ]))
+                
+                # Align options with the main question (indent by 15pt)
+                opt_container = Table(
+                    [[Spacer(1, 1), opt_table]],
+                    colWidths=[15, 508.27]
+                )
+                opt_container.hAlign = 'LEFT'
+                opt_container.setStyle(TableStyle([
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                    ('TOPPADDING', (0, 0), (-1, -1), 0),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+                ]))
+                q_flowables.append(opt_container)
+                
+        # Display sub-questions if present (and not a main MCQ)
+        sub_questions_list = []
+        if not is_main_mcq:
+            sub_questions_list = q.sub_questions if isinstance(q.sub_questions, list) else []
+        for idx, sub in enumerate(sub_questions_list, 1):
+            sub_flowables = []
+            sub_text = sub.get("text", "").strip()
+            
+            # If sub_text contains HTML, parse it into flowables
+            sub_flowables_list = parse_html_to_flowables(sub_text, style_question)
+            if sub_flowables_list:
+                # Prepend sub-question number to the first paragraph flowable if it doesn't already have one
+                first_flowable = sub_flowables_list[0]
+                if isinstance(first_flowable, Paragraph):
+                    first_text = first_flowable.text
+                    prefix_pattern = r'^(\d+[\.\)]|[a-zA-Z][\.\)]|\([a-zA-Z0-9]\)|[\u0AE6-\u0AEF]+[\.\)])'
+                    if not re.match(prefix_pattern, first_text):
+                        first_text = f"{idx}. {first_text}"
+                    sub_flowables_list[0] = Paragraph(first_text, style_question)
+                sub_flowables.extend(sub_flowables_list)
+            else:
+                sub_flowables.append(Paragraph(f"{idx}. ", style_question))
+            
+            # Render MCQ options if sub-question type is MCQ
+            is_mcq = sub.get("type") == "MCQ" or sub.get("question_type") == "MCQ"
+            options = sub.get("options", [])
+            non_empty_options = [o for o in options if str(o).strip()]
+            if is_mcq and non_empty_options:
+                prefixes = ["a. ", "b. ", "c. ", "d. "]
+                formatted_opts = []
+                for o_idx, opt in enumerate(options[:4]):
+                    opt_str = str(opt).strip()
+                    if not opt_str:
+                        continue
+                    # Check if already has a/b/c/d or A/B/C/D prefix
+                    if not re.match(r'^[A-Da-d]\s*[\.\)]', opt_str):
+                        opt_str = prefixes[o_idx] + opt_str
+                    formatted_opts.append(opt_str)
+                
+                # Pad to at least 4 items to prevent IndexError
+                while len(formatted_opts) < 4:
+                    formatted_opts.append("")
+                    
+                max_len = max(len(o) for o in formatted_opts) if formatted_opts else 0
+                sub_flowables.append(Spacer(1, 4))
+                if max_len < 15:
+                    opt_table = Table([[Paragraph(process_unicode_tags(o), style_opt) for o in formatted_opts]], colWidths=[115]*4)
+                elif max_len < 30:
+                    opt_table = Table([
+                        [Paragraph(process_unicode_tags(formatted_opts[0]), style_opt), Paragraph(process_unicode_tags(formatted_opts[1]), style_opt)],
+                        [Paragraph(process_unicode_tags(formatted_opts[2]), style_opt), Paragraph(process_unicode_tags(formatted_opts[3]), style_opt)]
+                    ], colWidths=[230, 230])
+                else:
+                    opt_table = Table([[Paragraph(process_unicode_tags(o), style_opt)] for o in formatted_opts], colWidths=[460])
                 
                 opt_table.setStyle(TableStyle([
                     ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -405,8 +569,9 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
             
             sub_q_table = Table(
                 [[Spacer(1, 1), sub_flowables, sub_marks_para]],
-                colWidths=[20, 495.27, 40]
+                colWidths=[20, 463.27, 40]
             )
+            sub_q_table.hAlign = 'LEFT'
             sub_q_table.setStyle(TableStyle([
                 ('VALIGN', (0, 0), (-1, -1), 'TOP'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 0),

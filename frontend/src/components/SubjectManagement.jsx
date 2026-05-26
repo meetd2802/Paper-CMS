@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { BookOpen, Plus, Trash2, Edit, Check, X } from 'lucide-react';
 
-const API = 'http://localhost:8000/api';
+const API = import.meta.env.VITE_API_URL;
 
 const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConfirm }) => {
   const [newName, setNewName] = useState('');

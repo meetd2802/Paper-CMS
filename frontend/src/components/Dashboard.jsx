@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BookOpen, FileText, Users, TrendingUp, GraduationCap, ArrowRight } from 'lucide-react';
 
-const API = 'http://localhost:8000/api';
+const API = import.meta.env.VITE_API_URL;
 
 const Dashboard = ({ standards, token, user, onOpenClass }) => {
   const [stats, setStats] = useState({ totalPapers: 0, totalClasses: 0, totalTeachers: 0 });

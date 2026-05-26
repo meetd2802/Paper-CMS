@@ -44,6 +44,21 @@ def onboard_teacher(
     db.add(new_teacher)
     db.commit()
     db.refresh(new_teacher)
+    
+    for std_id in payload.standard_ids:
+        std = db.query(Standard).filter(Standard.id == std_id).first()
+        if not std:
+            raise HTTPException(status_code=404, detail=f"Standard ID {std_id} not found")
+        for sub in payload.subjects:
+            assignment = TeacherAssignment(
+                teacher_id=new_teacher.id,
+                standard_id=std_id,
+                subject=sub
+            )
+            db.add(assignment)
+            
+    db.commit()
+    db.refresh(new_teacher)
     return new_teacher
 
 @router.get("", response_model=List[TeacherOut])

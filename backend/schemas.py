@@ -58,6 +58,8 @@ class SubjectOut(BaseModel):
 # --- Teacher Schemas ---
 class TeacherOnboard(BaseModel):
     email: EmailStr
+    standard_ids: List[int] = []
+    subjects: List[str] = []
 
 class TeacherAssignmentOut(BaseModel):
     id: int

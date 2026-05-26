@@ -4,7 +4,7 @@ import {
   FolderOpen, Plus, Trash2, GraduationCap
 } from 'lucide-react';
 
-const API = 'http://localhost:8000/api';
+const API = import.meta.env.VITE_API_URL;
 
 const Sidebar = ({ user, standards, activeTab, activeStandard, onTabChange, onOpenClass, onLogout, token, fetchStandards, showAlert, showConfirm }) => {
   const [classesOpen, setClassesOpen] = useState(true);
