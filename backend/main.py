@@ -2,15 +2,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from backend.database import engine, Base
     from backend.config import UPLOAD_DIR
-    from backend.routers import auth, standards, papers, questions, uploads, teachers, subjects
+    from backend.routers import auth, standards, papers, questions, uploads, teachers, subjects, ai
 except ImportError:
     from database import engine, Base
     from config import UPLOAD_DIR
-    from routers import auth, standards, papers, questions, uploads, teachers, subjects
+    from routers import auth, standards, papers, questions, uploads, teachers, subjects, ai
 
 # Create DB tables on startup
 Base.metadata.create_all(bind=engine)
@@ -52,6 +55,7 @@ app.include_router(questions.router)
 app.include_router(uploads.router)
 app.include_router(teachers.router)
 app.include_router(subjects.router)
+app.include_router(ai.router)
 
 @app.get("/")
 def read_root():

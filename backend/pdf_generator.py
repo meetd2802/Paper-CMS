@@ -158,13 +158,7 @@ def draw_page_decorations(canvas, doc):
     canvas.rect(20, 20, 595.27 - 40, 841.89 - 40)
     
     # Print the active frame coordinates for debugging
-    try:
-        frame_log = f"ACTIVE TEMPLATE FRAME: x1={doc.pageTemplate.frames[0]._x1} width={doc.pageTemplate.frames[0]._width}\n"
-        with open('/Users/meet/.gemini/antigravity/brain/6ab47fb8-ccea-40dd-adb0-87dead90115e/scratch/margins.txt', 'a') as debug_f:
-            debug_f.write(frame_log)
-        print("ACTIVE TEMPLATE FRAME: x1 =", doc.pageTemplate.frames[0]._x1, "width =", doc.pageTemplate.frames[0]._width)
-    except Exception as e:
-        print("Frame inspect error:", e)
+    # print("ACTIVE TEMPLATE FRAME: x1 =", doc.pageTemplate.frames[0]._x1, "width =", doc.pageTemplate.frames[0]._width)
         
     # 2. Page numbering in bottom right margin
     canvas.setFont("Times-Roman", 9)
@@ -184,8 +178,6 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
         topMargin=36,
         bottomMargin=36
     )
-    with open('/Users/meet/.gemini/antigravity/brain/6ab47fb8-ccea-40dd-adb0-87dead90115e/scratch/margins.txt', 'a') as debug_f:
-        debug_f.write(f"CALL MARGINS: left={doc.leftMargin} right={doc.rightMargin} width={doc.width}\n")
     print("DEBUG MARGINS: left =", doc.leftMargin, "right =", doc.rightMargin, "width =", doc.width)
     
     styles = getSampleStyleSheet()

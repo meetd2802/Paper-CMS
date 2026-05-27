@@ -21,7 +21,7 @@ REM Check frontend node_modules
 echo.
 echo Checking React Frontend dependencies...
 if not exist "frontend\node_modules\" (
-    echo node_modules not found. Installing frontend dependencies (this may take a minute)...
+    echo node_modules not found. Installing frontend dependencies ^(this may take a minute^)...
     cd frontend
     call npm install --legacy-peer-deps --no-audit --no-fund
     cd ..
@@ -42,4 +42,4 @@ echo - Backend Interactive docs: http://127.0.0.1:8000/docs
 echo - Frontend Application: http://localhost:5173
 echo.
 echo Press any key to close this launcher shell (servers will keep running).
-pause > null
+pause > nul

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft, Save, Plus, Trash2, ArrowUp, ArrowDown,
-  FileText, Key, RefreshCw, Upload, Download
+  FileText, Key, RefreshCw, Upload, Download, Sparkles
 } from 'lucide-react';
+import AISuggestModal from './AISuggestModal';
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -40,6 +41,7 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
   const [refreshPreview, setRefreshPreview] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(false);
   const logoInputRef = useRef();
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
 
   const isAdmin = user?.role === 'superadmin';
 
@@ -147,6 +149,17 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
       [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
       return arr;
     });
+  };
+
+  const handleAISuggestionsAdded = (newQuestions) => {
+    setQuestions(prev => [
+      ...prev,
+      ...newQuestions.map((q, i) => ({
+        ...q,
+        id: null,
+        display_order: prev.length + i
+      }))
+    ]);
   };
 
   // Sub-questions
@@ -627,9 +640,14 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
         <div className="card">
           <div className="card-header">
             <span className="card-title">Questions ({questions.length})</span>
-            <button className="btn btn-primary btn-sm" onClick={addQuestion}>
-              <Plus size={14} /> Add Question
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-outline btn-sm" onClick={() => setIsAIModalOpen(true)} style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}>
+                <Sparkles size={14} /> Suggest Questions
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={addQuestion}>
+                <Plus size={14} /> Add Question
+              </button>
+            </div>
           </div>
 
           {questions.length === 0 ? (
@@ -808,11 +826,12 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                                           </div>
                                         ))}
                                       </div>
-                                      <div style={{ marginTop: 6, paddingLeft: 12, borderLeft: '2px solid var(--border-color)' }}>
+                                      <div style={{ marginTop: 8, paddingLeft: 12 }}>
+                                        <label className="form-label" style={{ fontSize: 11 }}>Correct Option / Answer</label>
                                         <input
                                           className="form-control"
-                                          style={{ fontSize: 11.5, padding: '4px 8px' }}
-                                          placeholder="Correct Answer (e.g. a)"
+                                          style={{ fontSize: 12, padding: '4px 8px' }}
+                                          placeholder="e.g. a or text"
                                           value={sq.answer || ''}
                                           onChange={e => updateSubQuestion(idx, si, 'answer', e.target.value)}
                                         />
@@ -935,6 +954,15 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
           )}
         </div>
       </div>
+
+      <AISuggestModal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        token={token}
+        showAlert={showAlert}
+        paperDetails={{ className, subject }}
+        onAddQuestions={handleAISuggestionsAdded}
+      />
     </div>
   );
 };
