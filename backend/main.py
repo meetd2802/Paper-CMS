@@ -18,16 +18,75 @@ except ImportError:
 # Create DB tables on startup
 Base.metadata.create_all(bind=engine)
 
-# Auto-migrate: check if sub_questions exists in questions table
+# Auto-migrate: check and apply missing columns/indexes
 from sqlalchemy import text
-try:
+def run_migrations(engine):
     with engine.begin() as connection:
-        result = connection.execute(text("SHOW COLUMNS FROM questions LIKE 'sub_questions'"))
-        if not result.fetchone():
+        is_sqlite = engine.dialect.name == "sqlite"
+        
+        for column, col_type in [("is_active", "BOOLEAN NOT NULL DEFAULT 1"), ("boards", "JSON NULL")]:
+            try:
+                connection.execute(text(f"ALTER TABLE users ADD COLUMN {column} {col_type};"))
+                print(f"Added column {column} to users table")
+            except Exception:
+                pass
+
+        # Make sure all existing users are set to active (unblocked) by default
+        try:
+            connection.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL or is_active = 0;"))
+            print("Set existing users to active")
+        except Exception:
+            pass
+                
+        # 2. standards table
+        for column, col_type in [("board", "VARCHAR(50) NOT NULL DEFAULT 'CBSE'"), ("user_id", "INT NULL")]:
+            try:
+                connection.execute(text(f"ALTER TABLE standards ADD COLUMN {column} {col_type};"))
+                print(f"Added column {column} to standards table")
+            except Exception:
+                pass
+                
+        # 3. subjects table
+        for column, col_type in [("board", "VARCHAR(50) NOT NULL DEFAULT 'CBSE'"), ("user_id", "INT NULL")]:
+            try:
+                connection.execute(text(f"ALTER TABLE subjects ADD COLUMN {column} {col_type};"))
+                print(f"Added column {column} to subjects table")
+            except Exception:
+                pass
+                
+        # 4. question_papers table
+        for column, col_type in [("board", "VARCHAR(50) NOT NULL DEFAULT 'CBSE'")]:
+            try:
+                connection.execute(text(f"ALTER TABLE question_papers ADD COLUMN {column} {col_type};"))
+                print(f"Added column {column} to question_papers table")
+            except Exception:
+                pass
+
+        # 5. questions table
+        try:
             connection.execute(text("ALTER TABLE questions ADD COLUMN sub_questions JSON NULL;"))
-            print("Successfully added sub_questions column to questions table.")
+            print("Added sub_questions column to questions table")
+        except Exception:
+            pass
+            
+        # 6. Drop unique constraints on standards(name) and subjects(name) so they can be duplicated per user
+        if not is_sqlite:
+            try:
+                connection.execute(text("ALTER TABLE standards DROP INDEX name;"))
+                print("Dropped unique index name on standards")
+            except Exception:
+                pass
+                
+            try:
+                connection.execute(text("ALTER TABLE subjects DROP INDEX name;"))
+                print("Dropped unique index name on subjects")
+            except Exception:
+                pass
+
+try:
+    run_migrations(engine)
 except Exception as e:
-    print("Migration check note (sub_questions):", e)
+    print("Migration run note:", e)
 
 app = FastAPI(
     title="Question Paper CMS API",

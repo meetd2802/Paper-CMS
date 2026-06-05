@@ -3,7 +3,7 @@ import { LogIn, Key, Mail, AlertTriangle, Eye, EyeOff } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL;
 
-const Login = ({ onLoginSuccess }) => {
+const Login = ({ onLoginSuccess, onGoToSignup }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -135,6 +135,16 @@ const Login = ({ onLoginSuccess }) => {
             <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', padding: '11px' }} disabled={loading}>
               {loading ? <span className="spinner" /> : <><LogIn size={16} /> Sign In</>}
             </button>
+            <div style={{ textAlign: 'center', marginTop: 16 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>New teacher? </span>
+              <button 
+                type="button" 
+                onClick={onGoToSignup} 
+                style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                Create Account
+              </button>
+            </div>
           </form>
         ) : (
           <form onSubmit={handleReset}>

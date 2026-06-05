@@ -25,17 +25,28 @@ class UserOut(BaseModel):
     role: str
     created_at: datetime
     must_reset_password: bool
+    is_active: bool = True
+    boards: Optional[List[str]] = None
     
     class Config:
         from_attributes = True
 
+class TeacherSignup(BaseModel):
+    email: EmailStr
+    boards: List[str]
+    standards: Optional[List[str]] = None
+    subjects: Optional[List[str]] = None
+
 # --- Standard Schemas ---
 class StandardCreate(BaseModel):
     name: str
+    board: Optional[str] = "CBSE"
 
 class StandardOut(BaseModel):
     id: int
     name: str
+    board: str = "CBSE"
+    user_id: Optional[int] = None
     created_at: datetime
     
     class Config:
@@ -44,11 +55,14 @@ class StandardOut(BaseModel):
 # --- Subject Schemas ---
 class SubjectCreate(BaseModel):
     name: str
+    board: Optional[str] = "CBSE"
     default_instructions: Optional[str] = None
 
 class SubjectOut(BaseModel):
     id: int
     name: str
+    board: str = "CBSE"
+    user_id: Optional[int] = None
     default_instructions: Optional[str] = None
     created_at: datetime
     
@@ -76,6 +90,8 @@ class TeacherOut(BaseModel):
     role: str
     created_at: datetime
     must_reset_password: bool
+    is_active: bool = True
+    boards: Optional[List[str]] = None
     assignments: List[TeacherAssignmentOut] = []
     
     class Config:
@@ -125,6 +141,7 @@ class QuestionPaperCreate(BaseModel):
     title: str
     subject: str
     class_name: str
+    board: Optional[str] = "CBSE"
     date_str: Optional[str] = None
     time_duration: Optional[str] = None
     max_marks: int = 25
@@ -136,6 +153,7 @@ class QuestionPaperUpdate(BaseModel):
     title: Optional[str] = None
     subject: Optional[str] = None
     class_name: Optional[str] = None
+    board: Optional[str] = None
     date_str: Optional[str] = None
     time_duration: Optional[str] = None
     max_marks: Optional[int] = None
@@ -149,6 +167,7 @@ class QuestionPaperOut(BaseModel):
     title: str
     subject: str
     class_name: str
+    board: str = "CBSE"
     date_str: Optional[str] = None
     time_duration: Optional[str] = None
     max_marks: int

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BookOpen, Plus, Trash2, Edit, Check, X } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL;
 
-const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConfirm }) => {
+const SubjectManagement = ({ token, user, subjects, fetchSubjects, showAlert, showConfirm }) => {
   const [newName, setNewName] = useState('');
+  const [selectedBoard, setSelectedBoard] = useState('CBSE');
   const [newInstructions, setNewInstructions] = useState('');
   const [adding, setAdding] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -12,6 +13,12 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
   const [editName, setEditName] = useState('');
   const [editInstructions, setEditInstructions] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (user?.boards && user.boards.length > 0) {
+      setSelectedBoard(user.boards[0]);
+    }
+  }, [user]);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -21,7 +28,11 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
       const res = await fetch(`${API}/subjects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: newName.trim(), default_instructions: newInstructions.trim() || null }),
+        body: JSON.stringify({
+          name: newName.trim(),
+          board: selectedBoard,
+          default_instructions: newInstructions.trim() || null
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Failed to add subject');
@@ -29,7 +40,7 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
       setNewInstructions('');
       setShowAddForm(false);
       fetchSubjects();
-      showAlert('Success', `Subject "${data.name}" added.`, 'success');
+      showAlert('Success', `Subject "${data.name}" added to ${selectedBoard}.`, 'success');
     } catch (err) {
       showAlert('Error', err.message, 'error');
     } finally {
@@ -81,6 +92,8 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
     });
   };
 
+  const boardsList = user?.role === 'superadmin' ? ['CBSE', 'GSEB'] : (user?.boards || ['CBSE', 'GSEB']);
+
   return (
     <div>
       <div className="page-header">
@@ -99,8 +112,8 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
           <div className="card-header">
             <span className="card-title">New Subject</span>
           </div>
-          <form onSubmit={handleAdd} className="card-body">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16, alignItems: 'flex-start' }}>
+          <form onSubmit={handleAdd} className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
               <div className="form-group">
                 <label className="form-label">Subject Name *</label>
                 <input
@@ -114,15 +127,28 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
                 />
               </div>
               <div className="form-group">
-                <label className="form-label">Default Instructions</label>
-                <textarea
+                <label className="form-label">Select Board *</label>
+                <select 
                   className="form-control"
-                  placeholder="Instructions that auto-fill when creating a paper for this subject…"
-                  value={newInstructions}
-                  onChange={e => setNewInstructions(e.target.value)}
-                  rows={3}
-                />
+                  value={selectedBoard}
+                  onChange={e => setSelectedBoard(e.target.value)}
+                  required
+                >
+                  {boardsList.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
               </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Default Instructions</label>
+              <textarea
+                className="form-control"
+                placeholder="Instructions that auto-fill when creating a paper for this subject…"
+                value={newInstructions}
+                onChange={e => setNewInstructions(e.target.value)}
+                rows={3}
+              />
             </div>
             <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-secondary" onClick={() => setShowAddForm(false)}>Cancel</button>
@@ -151,6 +177,7 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
             <thead>
               <tr>
                 <th>Subject</th>
+                <th>Board</th>
                 <th>Default Instructions</th>
                 <th style={{ width: 100 }}>Actions</th>
               </tr>
@@ -169,6 +196,11 @@ const SubjectManagement = ({ token, subjects, fetchSubjects, showAlert, showConf
                     ) : (
                       <span style={{ fontWeight: 600 }}>{sub.name}</span>
                     )}
+                  </td>
+                  <td>
+                    <span className={`badge ${sub.board === 'CBSE' ? 'badge-primary' : 'badge-warning'}`} style={{ border: sub.board === 'CBSE' ? '1px solid var(--color-primary-light)' : '1px solid #fcd34d', background: sub.board === 'CBSE' ? 'var(--color-primary-bg)' : 'var(--color-warning-bg)', fontSize: 11 }}>
+                      {sub.board}
+                    </span>
                   </td>
                   <td>
                     {editId === sub.id ? (

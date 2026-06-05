@@ -7,6 +7,10 @@ import ClassView from './components/ClassView';
 import PaperEditor from './components/PaperEditor';
 import TeacherManagement from './components/TeacherManagement';
 import SubjectManagement from './components/SubjectManagement';
+import Signup from './components/Signup';
+import Profile from './components/Profile';
+import ChangePasswordModal from './components/ChangePasswordModal';
+
 
 const API = import.meta.env.VITE_API_URL;
 
@@ -14,24 +18,24 @@ const API = import.meta.env.VITE_API_URL;
 const AlertModal = ({ alert, onClose }) => {
   if (!alert) return null;
   const colorMap = {
-    success: { bg: '#d1fae5', color: '#065f46', border: '#6ee7b7' },
-    error: { bg: '#fee2e2', color: '#991b1b', border: '#fca5a5' },
-    warning: { bg: '#fef3c7', color: '#92400e', border: '#fcd34d' },
-    info: { bg: '#eef2ff', color: '#3730a3', border: '#a5b4fc' },
+    success: { bg: 'rgba(16, 185, 129, 0.15)', color: '#a7f3d0', border: 'rgba(16, 185, 129, 0.3)' },
+    error: { bg: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', border: 'rgba(239, 68, 68, 0.3)' },
+    warning: { bg: 'rgba(245, 158, 11, 0.15)', color: '#fde68a', border: 'rgba(245, 158, 11, 0.3)' },
+    info: { bg: 'rgba(99, 102, 241, 0.15)', color: '#c7d2fe', border: 'rgba(99, 102, 241, 0.3)' },
   };
   const style = colorMap[alert.type] || colorMap.info;
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-box" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3 style={{ fontSize: 16, fontWeight: 700 }}>{alert.title}</h3>
+        <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: 'white' }}>{alert.title}</h3>
         </div>
         <div className="modal-body">
           <div style={{ padding: '12px 16px', borderRadius: 8, background: style.bg, color: style.color, border: `1px solid ${style.border}`, fontSize: 14 }}>
             {alert.message}
           </div>
         </div>
-        <div className="modal-footer">
+        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
           <button className="btn btn-primary" onClick={onClose}>OK</button>
         </div>
       </div>
@@ -45,13 +49,13 @@ const ConfirmModal = ({ confirm, onConfirm, onCancel }) => {
   return (
     <div className="modal-overlay">
       <div className="modal-box" style={{ maxWidth: 400 }}>
-        <div className="modal-header">
-          <h3 style={{ fontSize: 16, fontWeight: 700 }}>{confirm.title || 'Confirm'}</h3>
+        <div className="modal-header" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, color: 'white' }}>{confirm.title || 'Confirm'}</h3>
         </div>
         <div className="modal-body">
-          <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{confirm.message}</p>
+          <p style={{ fontSize: 14, color: 'rgba(255, 255, 255, 0.7)' }}>{confirm.message}</p>
         </div>
-        <div className="modal-footer">
+        <div className="modal-footer" style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)' }}>
           <button className="btn btn-secondary" onClick={onCancel}>Cancel</button>
           <button className="btn btn-danger" onClick={onConfirm}>Confirm</button>
         </div>
@@ -69,6 +73,9 @@ function App() {
   const [activeStandard, setActiveStandard] = useState(null);
   const [activePaperId, setActivePaperId] = useState(null);
   const [activeSubject, setActiveSubject] = useState(null);
+  const [isSigningUp, setIsSigningUp] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
 
   // Alert & Confirm state
   const [alertData, setAlertData] = useState(null);
@@ -115,7 +122,6 @@ function App() {
       if (res.ok) {
         const data = await res.json();
         setUser(data);
-        if (data.must_reset_password) setActiveTab('reset-password');
       } else {
         handleLogout();
       }
@@ -169,11 +175,17 @@ function App() {
   if (!token) {
     return (
       <>
-        <Login onLoginSuccess={handleLoginSuccess} />
+        {isSigningUp ? (
+          <Signup onGoToLogin={() => setIsSigningUp(false)} showAlert={showAlert} />
+        ) : (
+          <Login onLoginSuccess={handleLoginSuccess} onGoToSignup={() => setIsSigningUp(true)} />
+        )}
         <AlertModal alert={alertData} onClose={() => setAlertData(null)} />
       </>
     );
   }
+
+
 
   if (activeTab === 'editor') {
     return (
@@ -182,6 +194,7 @@ function App() {
           paperId={activePaperId}
           standardId={activeStandard?.id}
           standardName={activeStandard?.name}
+          standards={standards}
           onBack={handleBackFromEditor}
           token={token}
           user={user}
@@ -210,6 +223,8 @@ function App() {
         fetchStandards={fetchStandards}
         showAlert={showAlert}
         showConfirm={showConfirm}
+        onOpenProfile={() => setShowProfileModal(true)}
+        onOpenChangePassword={() => setShowChangePasswordModal(true)}
       />
       <div className="main-content">
         <div className="page-body">
@@ -248,6 +263,7 @@ function App() {
           {activeTab === 'subjects' && (
             <SubjectManagement
               token={token}
+              user={user}
               subjects={subjects}
               fetchSubjects={fetchSubjects}
               showAlert={showAlert}
@@ -256,6 +272,24 @@ function App() {
           )}
         </div>
       </div>
+      <Profile
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        token={token}
+        user={user}
+        fetchProfile={fetchProfile}
+        showAlert={showAlert}
+      />
+      <ChangePasswordModal
+        isOpen={showChangePasswordModal || (token && user?.must_reset_password)}
+        onClose={() => setShowChangePasswordModal(false)}
+        token={token}
+        user={user}
+        fetchProfile={fetchProfile}
+        showAlert={showAlert}
+        onLogout={handleLogout}
+        isFirstLogin={user?.must_reset_password}
+      />
       <AlertModal alert={alertData} onClose={() => setAlertData(null)} />
       <ConfirmModal confirm={confirmData} onConfirm={handleConfirmYes} onCancel={handleConfirmNo} />
     </div>

@@ -16,6 +16,8 @@ class User(Base):
     role = Column(String(50), default="superadmin")
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     must_reset_password = Column(Boolean, default=False, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    boards = Column(JSON, nullable=True) # e.g. ["CBSE", "GSEB"]
 
     # Relationships
     assignments = relationship("TeacherAssignment", back_populates="teacher", cascade="all, delete-orphan")
@@ -25,7 +27,9 @@ class Standard(Base):
     __tablename__ = "standards"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    board = Column(String(50), default="CBSE", nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     
     papers = relationship("QuestionPaper", back_populates="standard", cascade="all, delete-orphan")
@@ -35,7 +39,9 @@ class Subject(Base):
     __tablename__ = "subjects"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False)
+    name = Column(String(100), nullable=False)
+    board = Column(String(50), default="CBSE", nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     default_instructions = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
@@ -58,6 +64,7 @@ class QuestionPaper(Base):
     title = Column(String(255), nullable=False)
     subject = Column(String(100), nullable=False)
     class_name = Column(String(50), nullable=False)
+    board = Column(String(50), default="CBSE", nullable=False)
     date_str = Column(String(100), nullable=True)
     time_duration = Column(String(100), nullable=True)
     max_marks = Column(Integer, default=25)

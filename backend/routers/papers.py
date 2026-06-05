@@ -57,6 +57,11 @@ class PreviewPayload(BaseModel):
 
 # Helper to check teacher permissions on standard and subject
 def check_teacher_scope(user: User, standard_id: int, subject: str):
+    if user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
     if user.role == "teacher":
         assigned = any(a.standard_id == standard_id and a.subject == subject for a in user.assignments)
         if not assigned:
@@ -69,16 +74,24 @@ def check_teacher_scope(user: User, standard_id: int, subject: str):
 def get_papers(
     standard_id: Optional[int] = None,
     subject: Optional[str] = None,
+    board: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = db.query(QuestionPaper)
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
+    query = db.query(QuestionPaper).filter(QuestionPaper.created_by == current_user.id)
     if standard_id is not None:
         query = query.filter(QuestionPaper.standard_id == standard_id)
     if subject is not None:
         query = query.filter(QuestionPaper.subject == subject)
-    if current_user.role == "teacher":
-        query = query.filter(QuestionPaper.created_by == current_user.id)
+    if board is not None:
+        query = query.filter(QuestionPaper.board == board)
+        
     return query.order_by(QuestionPaper.created_at.desc()).all()
 
 @router.get("/standard/{standard_id}", response_model=List[QuestionPaperOut])
@@ -87,20 +100,20 @@ def get_papers_by_standard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
     std = db.query(Standard).filter(Standard.id == standard_id).first()
     if not std:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Standard not found")
         
-    query = db.query(QuestionPaper).filter(QuestionPaper.standard_id == standard_id)
-    if current_user.role == "teacher":
-        assigned_subjects = [a.subject for a in current_user.assignments if a.standard_id == standard_id]
-        query = query.filter(QuestionPaper.subject.in_(assigned_subjects))
-        # Teachers only see papers created in their assigned subjects. If the paper was created by admin
-        # but matches the subject, they can see it. But wait, in user request 1:
-        # "he should see only his created papers in his assign subject"
-        # So we should filter by created_by = current_user.id for teachers!
-        query = query.filter(QuestionPaper.created_by == current_user.id)
-        
+    query = db.query(QuestionPaper).filter(
+        QuestionPaper.standard_id == standard_id,
+        QuestionPaper.created_by == current_user.id
+    )
     return query.order_by(QuestionPaper.created_at.desc()).all()
 
 @router.get("/{paper_id}", response_model=QuestionPaperOut)
@@ -109,15 +122,19 @@ def get_paper_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    paper = db.query(QuestionPaper).filter(QuestionPaper.id == paper_id).first()
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
+    paper = db.query(QuestionPaper).filter(
+        QuestionPaper.id == paper_id,
+        QuestionPaper.created_by == current_user.id
+    ).first()
     if not paper:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question paper not found")
         
-    if current_user.role == "teacher":
-        check_teacher_scope(current_user, paper.standard_id, paper.subject)
-        if paper.created_by != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. This paper is owned by another user.")
-            
     return paper
 
 @router.post("", response_model=QuestionPaperOut, status_code=status.HTTP_201_CREATED)
@@ -126,6 +143,12 @@ def create_paper(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
     std = db.query(Standard).filter(Standard.id == paper_in.standard_id).first()
     if not std:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Standard not found")
@@ -137,6 +160,7 @@ def create_paper(
         title=paper_in.title,
         subject=paper_in.subject,
         class_name=paper_in.class_name,
+        board=std.board,
         date_str=paper_in.date_str,
         time_duration=paper_in.time_duration,
         max_marks=paper_in.max_marks,
@@ -157,23 +181,32 @@ def update_paper(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    paper = db.query(QuestionPaper).filter(QuestionPaper.id == paper_id).first()
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
+    paper = db.query(QuestionPaper).filter(
+        QuestionPaper.id == paper_id,
+        QuestionPaper.created_by == current_user.id
+    ).first()
     if not paper:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question paper not found")
         
-    if current_user.role == "teacher":
-        check_teacher_scope(current_user, paper.standard_id, paper.subject)
-        if paper.created_by != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. You do not own this paper.")
-            
-        # If updating standard_id or subject, check new values too
-        new_std = paper_in.standard_id if hasattr(paper_in, 'standard_id') and paper_in.standard_id is not None else paper.standard_id
-        new_sub = paper_in.subject if paper_in.subject is not None else paper.subject
-        check_teacher_scope(current_user, new_std, new_sub)
+    # If standard or subject are changing, verify scopes
+    new_std_id = paper_in.standard_id if hasattr(paper_in, 'standard_id') and paper_in.standard_id is not None else paper.standard_id
+    new_subject = paper_in.subject if paper_in.subject is not None else paper.subject
+    check_teacher_scope(current_user, new_std_id, new_subject)
+    
+    std = db.query(Standard).filter(Standard.id == new_std_id).first()
+    if not std:
+        raise HTTPException(status_code=404, detail="Standard not found")
 
     for k, v in paper_in.dict(exclude_unset=True).items():
         setattr(paper, k, v)
         
+    paper.board = std.board # Update board if standard changed
     db.commit()
     db.refresh(paper)
     return paper
@@ -184,14 +217,18 @@ def delete_paper(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    paper = db.query(QuestionPaper).filter(QuestionPaper.id == paper_id).first()
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
+    paper = db.query(QuestionPaper).filter(
+        QuestionPaper.id == paper_id,
+        QuestionPaper.created_by == current_user.id
+    ).first()
     if not paper:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question paper not found")
-        
-    if current_user.role == "teacher":
-        check_teacher_scope(current_user, paper.standard_id, paper.subject)
-        if paper.created_by != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
             
     db.delete(paper)
     db.commit()
@@ -203,14 +240,18 @@ def get_paper_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    paper = db.query(QuestionPaper).filter(QuestionPaper.id == paper_id).first()
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
+    paper = db.query(QuestionPaper).filter(
+        QuestionPaper.id == paper_id,
+        QuestionPaper.created_by == current_user.id
+    ).first()
     if not paper:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question paper not found")
-        
-    if current_user.role == "teacher":
-        check_teacher_scope(current_user, paper.standard_id, paper.subject)
-        if paper.created_by != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
             
     pdf_data = generate_paper_pdf(paper, is_answer_key=False)
     return Response(
@@ -225,14 +266,18 @@ def get_answer_key_pdf(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    paper = db.query(QuestionPaper).filter(QuestionPaper.id == paper_id).first()
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
+    paper = db.query(QuestionPaper).filter(
+        QuestionPaper.id == paper_id,
+        QuestionPaper.created_by == current_user.id
+    ).first()
     if not paper:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question paper not found")
-        
-    if current_user.role == "teacher":
-        check_teacher_scope(current_user, paper.standard_id, paper.subject)
-        if paper.created_by != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
             
     pdf_data = generate_paper_pdf(paper, is_answer_key=True)
     return Response(
@@ -246,6 +291,12 @@ def preview_pdf(
     payload: PreviewPayload,
     current_user: User = Depends(get_current_user)
 ):
+    if current_user.role == "superadmin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SuperAdmin is restricted from viewing or managing question papers."
+        )
+        
     mock_paper = MockPaperObj(payload.dict())
     pdf_data = generate_paper_pdf(mock_paper, is_answer_key=payload.is_answer_key, structure_json=payload.structure_json)
     return Response(content=pdf_data, media_type="application/pdf")

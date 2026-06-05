@@ -39,7 +39,8 @@ def onboard_teacher(
         email=payload.email,
         password_hash=hashed_pw,
         role="teacher",
-        must_reset_password=True
+        must_reset_password=True,
+        is_active=True
     )
     db.add(new_teacher)
     db.commit()
@@ -66,8 +67,63 @@ def list_teachers(
     db: Session = Depends(get_db),
     admin: User = Depends(require_superadmin)
 ):
+    # Return all teachers, including soft-deleted/deactivated ones
     teachers = db.query(User).filter(User.role == "teacher").all()
     return teachers
+
+@router.get("/dashboard-analytics")
+def get_dashboard_analytics(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_superadmin)
+):
+    from backend.models import QuestionPaper, Subject
+    from sqlalchemy import func, text
+    
+    # Total papers
+    total_papers = db.query(QuestionPaper).count()
+    
+    # User stats
+    total_users = db.query(User).filter(User.role == "teacher").count()
+    active_users = db.query(User).filter(User.role == "teacher", User.is_active == True).count()
+    blocked_users = db.query(User).filter(User.role == "teacher", User.is_active == False).count()
+    password_changed = db.query(User).filter(User.role == "teacher", User.must_reset_password == False).count()
+    password_not_changed = db.query(User).filter(User.role == "teacher", User.must_reset_password == True).count()
+    
+    # Subject analytics
+    subj_counts = db.query(QuestionPaper.subject, func.count(QuestionPaper.id).label("count"))\
+                    .group_by(QuestionPaper.subject)\
+                    .order_by(text("count DESC"))\
+                    .all()
+    subject_analytics = [{"subject": row[0], "count": row[1]} for row in subj_counts]
+    
+    # Board splits
+    board_counts = db.query(QuestionPaper.board, func.count(QuestionPaper.id).label("count"))\
+                     .group_by(QuestionPaper.board)\
+                     .all()
+    board_analytics = [{"board": row[0] or "CBSE", "count": row[1]} for row in board_counts]
+    
+    # User trending activity (top teachers by papers created)
+    teacher_counts = db.query(User.email, func.count(QuestionPaper.id).label("count"))\
+                       .join(QuestionPaper, QuestionPaper.created_by == User.id)\
+                       .group_by(User.email)\
+                       .order_by(text("count DESC"))\
+                       .limit(5)\
+                       .all()
+    top_teachers = [{"email": row[0], "count": row[1]} for row in teacher_counts]
+    
+    return {
+        "total_papers": total_papers,
+        "users": {
+            "total": total_users,
+            "active": active_users,
+            "blocked": blocked_users,
+            "password_changed": password_changed,
+            "password_not_changed": password_not_changed
+        },
+        "subjects": subject_analytics,
+        "boards": board_analytics,
+        "top_teachers": top_teachers
+    }
 
 @router.put("/{teacher_id}", response_model=TeacherOut)
 def update_teacher(
@@ -104,6 +160,21 @@ def update_teacher(
     db.refresh(teacher)
     return teacher
 
+@router.put("/{teacher_id}/toggle-active", response_model=TeacherOut)
+def toggle_teacher_active(
+    teacher_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_superadmin)
+):
+    teacher = db.query(User).filter(User.id == teacher_id, User.role == "teacher").first()
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+        
+    teacher.is_active = not teacher.is_active
+    db.commit()
+    db.refresh(teacher)
+    return teacher
+
 @router.delete("/{teacher_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_teacher(
     teacher_id: int,
@@ -114,7 +185,7 @@ def delete_teacher(
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     
-    db.query(TeacherAssignment).filter(TeacherAssignment.teacher_id == teacher_id).delete()
-    db.delete(teacher)
+    # Soft delete: set is_active to False
+    teacher.is_active = False
     db.commit()
     return

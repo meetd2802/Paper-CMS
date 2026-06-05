@@ -54,6 +54,13 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: 
     if user is None:
         raise credentials_exception
         
+    # Check if user is blocked or deactivated
+    if not getattr(user, "is_active", True):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You have been blocked due to suspicious activity. Contact administrator to access this."
+        )
+        
     # Lockout logic for must_reset_password
     if user.must_reset_password:
         path = request.url.path

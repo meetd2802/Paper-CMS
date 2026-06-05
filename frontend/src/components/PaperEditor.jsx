@@ -7,11 +7,48 @@ import AISuggestModal from './AISuggestModal';
 
 const API = import.meta.env.VITE_API_URL;
 
-const QUESTION_TYPES = ['Short Answer', 'Long Answer', 'MCQ', 'Fill in the Blank', 'True/False', 'Match the Following', 'Image Question'];
+const CBSE_QUESTION_TYPES = [
+  'MCQ (1 Mark)',
+  'Assertion-Reason',
+  'Case-Based / Source-Based',
+  'Very Short Answer (2 Marks)',
+  'Short Answer (3 Marks)',
+  'Long Answer (5 Marks)',
+  'Extract-Based Question',
+  'Match the Following',
+  'Fill in the Blank',
+  'True/False',
+  'Formal Letter',
+  'Analytical Paragraph',
+  'Notice / Message / Diary Entry',
+  'Diagram / Labeling Question',
+  'Map Work'
+];
+
+const GSEB_QUESTION_TYPES = [
+  'Part A: MCQ (1 Mark)',
+  'Very Short Answer (1 Mark)',
+  'Short Answer (2 Marks)',
+  'Long Answer (3 Marks)',
+  'Detailed Answer (5 Marks / 8 Marks)',
+  'Fill in the Blank',
+  'True/False',
+  'Match the Following',
+  'Grammar: Opposites (વિરોધી / विलोમ)',
+  'Grammar: Synonyms (સમાનાર્થી / पर्यायवाची)',
+  'Grammar: Muhavre / Rudhi Prayog',
+  'Grammar: Samas / Sandhi',
+  'Grammar: translation',
+  'Essay Writing',
+  'Letter Writing',
+  'Paragraph Writing',
+  'Translation Question',
+  'Map Work'
+];
 
 const defaultMCQOptions = () => ['', '', '', ''];
 
-const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, subjects, activeSubject, showAlert, showConfirm }) => {
+const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack, token, user, subjects, activeSubject, showAlert, showConfirm }) => {
   // Metadata
   const [title, setTitle] = useState('');
   const [subject, setSubject] = useState(activeSubject || '');
@@ -42,17 +79,51 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
   const [previewLoading, setPreviewLoading] = useState(false);
   const logoInputRef = useRef();
   const [isAIModalOpen, setIsAIModalOpen] = useState(false);
+  const [aiSessionMainQIdx, setAiSessionMainQIdx] = useState(null);
+  const [aiTargetQIdx, setAiTargetQIdx] = useState(null);
+  const [aiTargetSqIdx, setAiTargetSqIdx] = useState(null);
+  const [aiTargetField, setAiTargetField] = useState(null);
 
   const isAdmin = user?.role === 'superadmin';
+
+  const filteredStandards = React.useMemo(() => {
+    const currentStandard = standards.find(s => String(s.id) === String(standardId));
+    const currentBoard = currentStandard?.board;
+    if (!currentBoard) return standards;
+    return standards.filter(s => s.board === currentBoard);
+  }, [standards, standardId]);
+
+  const currentBoard = React.useMemo(() => {
+    const std = standards.find(s => String(s.id) === String(standardId));
+    return std?.board || user?.boards?.[0] || 'CBSE';
+  }, [standards, standardId, user]);
+
+  const currentQuestionTypes = React.useMemo(() => {
+    return currentBoard === 'GSEB' ? GSEB_QUESTION_TYPES : CBSE_QUESTION_TYPES;
+  }, [currentBoard]);
 
   // Subjects available to this user for this standard
   const availableSubjects = React.useMemo(() => {
     if (isAdmin) return subjects;
-    if (!user?.assignments) return [];
-    return user.assignments
-      .filter(a => String(a.standard_id) === String(standardId))
-      .map(a => ({ name: a.subject }));
-  }, [user, standardId, subjects, isAdmin]);
+    // For teachers: prefer assignment-based filtering (admin-assigned subjects per class)
+    if (user?.assignments?.length > 0) {
+      const assignedNames = user.assignments
+        .filter(a => String(a.standard_id) === String(standardId))
+        .map(a => a.subject);
+      if (assignedNames.length > 0) {
+        // Return full subject objects where we have them, else name-only stubs
+        return assignedNames.map(name => {
+          const found = subjects.find(s => s.name === name);
+          return found || { name };
+        });
+      }
+    }
+    // Fallback: show all of the teacher's own subjects filtered by the current board
+    if (subjects.length > 0) {
+      return currentBoard ? subjects.filter(s => s.board === currentBoard) : subjects;
+    }
+    return [];
+  }, [user, standardId, subjects, isAdmin, currentBoard]);
 
   // Load paper if editing
   useEffect(() => {
@@ -115,10 +186,11 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
   }, [subject]);
 
   const addQuestion = () => {
+    const defaultType = currentBoard === 'GSEB' ? 'Part A: MCQ (1 Mark)' : 'MCQ (1 Mark)';
     setQuestions(prev => [...prev, {
       id: null,
       section: '',
-      question_type: 'Short Answer',
+      question_type: defaultType,
       question_text: '',
       answer_text: '',
       marks: 1,
@@ -151,15 +223,193 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
     });
   };
 
-  const handleAISuggestionsAdded = (newQuestions) => {
-    setQuestions(prev => [
-      ...prev,
-      ...newQuestions.map((q, i) => ({
-        ...q,
+  const handleOpenAISuggestGeneral = () => {
+    setAiSessionMainQIdx(null);
+    setAiTargetQIdx(null);
+    setAiTargetSqIdx(null);
+    setAiTargetField(null);
+    setIsAIModalOpen(true);
+  };
+
+  const handleOpenAISuggestForQuestion = (idx) => {
+    setAiSessionMainQIdx(null);
+    setAiTargetQIdx(idx);
+    setAiTargetSqIdx(null);
+    setAiTargetField(null);
+    setIsAIModalOpen(true);
+  };
+
+  const handleOpenAISuggestForSubQuestion = (idx, si) => {
+    setAiSessionMainQIdx(null);
+    setAiTargetQIdx(idx);
+    setAiTargetSqIdx(si);
+    setAiTargetField(null);
+    setIsAIModalOpen(true);
+  };
+
+  const handleOpenAISuggestForSection = (idx) => {
+    setAiSessionMainQIdx(null);
+    setAiTargetQIdx(idx);
+    setAiTargetSqIdx(null);
+    setAiTargetField('section');
+    setIsAIModalOpen(true);
+  };
+
+  const handleOpenAISuggestForSubQuestions = (idx) => {
+    setAiSessionMainQIdx(null);
+    setAiTargetQIdx(idx);
+    setAiTargetSqIdx(null);
+    setAiTargetField('sub_questions');
+    setIsAIModalOpen(true);
+  };
+
+  const handleAISuggestionsAdded = (newQuestions, topic, qType) => {
+    // Check if we are replacing/populating an existing target
+    if (aiTargetField === 'section') {
+      if (aiTargetQIdx !== null) {
+        const suggestedHeader = newQuestions[0]?.question_text || '';
+        updateQuestion(aiTargetQIdx, 'section', suggestedHeader);
+      }
+      return;
+    }
+
+    if (aiTargetField === 'sub_questions') {
+      if (aiTargetQIdx !== null) {
+        const convertedSubs = newQuestions.map(q => {
+          const isMCQ = q.question_type?.includes('MCQ') || (q.sub_questions && q.sub_questions.length > 0);
+          return {
+            text: q.question_text || '',
+            answer: q.answer_text || '',
+            type: isMCQ ? 'MCQ' : 'text',
+            options: isMCQ && q.sub_questions ? q.sub_questions.map(opt => opt.text || '') : defaultMCQOptions(),
+            marks: Number(q.marks) || 1
+          };
+        });
+
+        setQuestions(prev => {
+          const updated = [...prev];
+          if (updated[aiTargetQIdx]) {
+            const existingSubs = updated[aiTargetQIdx].sub_questions || [];
+            const addedMarks = convertedSubs.reduce((sum, s) => sum + s.marks, 0);
+            updated[aiTargetQIdx] = {
+              ...updated[aiTargetQIdx],
+              sub_questions: [...existingSubs, ...convertedSubs],
+              marks: Number(updated[aiTargetQIdx].marks || 0) + addedMarks
+            };
+          }
+          return updated;
+        });
+      }
+      return;
+    }
+
+    if (aiTargetQIdx !== null) {
+      const q = newQuestions[0];
+      if (!q) return;
+
+      if (aiTargetSqIdx !== null) {
+        // Overwrite the specific sub-question
+        const isMCQ = q.question_type?.includes('MCQ') || (q.sub_questions && q.sub_questions.length > 0);
+        const newSubObj = {
+          text: q.question_text || '',
+          answer: q.answer_text || '',
+          type: isMCQ ? 'MCQ' : 'text',
+          options: isMCQ && q.sub_questions ? q.sub_questions.map(opt => opt.text || '') : defaultMCQOptions(),
+          marks: Number(q.marks) || 1
+        };
+        
+        setQuestions(prev => {
+          const updated = [...prev];
+          if (updated[aiTargetQIdx]) {
+            const subs = [...(updated[aiTargetQIdx].sub_questions || [])];
+            subs[aiTargetSqIdx] = newSubObj;
+            updated[aiTargetQIdx] = { ...updated[aiTargetQIdx], sub_questions: subs };
+          }
+          return updated;
+        });
+      } else {
+        // Overwrite the main question
+        const isMCQ = q.question_type?.includes('MCQ') || (q.sub_questions && q.sub_questions.length > 0);
+        let newSubs = [];
+        if (isMCQ) {
+          newSubs = q.sub_questions ? q.sub_questions.map(opt => ({ text: opt.text || '', answer: '', type: 'text', options: defaultMCQOptions() })) : [];
+        } else if (q.sub_questions && q.sub_questions.length > 0) {
+          newSubs = q.sub_questions.map(sq => ({
+            text: sq.text || '',
+            answer: sq.answer || '',
+            type: sq.type || 'text',
+            options: sq.options || defaultMCQOptions(),
+            marks: sq.marks || 1
+          }));
+        }
+
+        setQuestions(prev => {
+          const updated = [...prev];
+          if (updated[aiTargetQIdx]) {
+            updated[aiTargetQIdx] = {
+              ...updated[aiTargetQIdx],
+              question_text: q.question_text || '',
+              answer_text: q.answer_text || '',
+              marks: Number(q.marks) || 1,
+              sub_questions: newSubs
+            };
+          }
+          return updated;
+        });
+      }
+      return;
+    }
+
+    // General Suggest: Group suggestions as subquestions of a single main question
+    const convertedSubs = newQuestions.map(q => {
+      const isMCQ = q.question_type?.includes('MCQ') || (q.sub_questions && q.sub_questions.length > 0);
+      return {
+        text: q.question_text || '',
+        answer: q.answer_text || '',
+        type: isMCQ ? 'MCQ' : 'text',
+        options: isMCQ && q.sub_questions ? q.sub_questions.map(opt => opt.text || '') : defaultMCQOptions(),
+        marks: Number(q.marks) || 1
+      };
+    });
+
+    if (aiSessionMainQIdx !== null && questions[aiSessionMainQIdx]) {
+      // Append to the existing main question in this session
+      const existingMain = questions[aiSessionMainQIdx];
+      const updatedSubs = [...(existingMain.sub_questions || []), ...convertedSubs];
+      const addedMarks = convertedSubs.reduce((sum, s) => sum + s.marks, 0);
+      
+      setQuestions(prev => {
+        const updated = [...prev];
+        updated[aiSessionMainQIdx] = {
+          ...updated[aiSessionMainQIdx],
+          sub_questions: updatedSubs,
+          marks: Number(updated[aiSessionMainQIdx].marks || 0) + addedMarks
+        };
+        return updated;
+      });
+    } else {
+      // Create a new main question
+      const addedMarks = convertedSubs.reduce((sum, s) => sum + s.marks, 0);
+      const mainText = topic ? `Answer the following questions based on: ${topic}` : 'Answer the following questions:';
+      
+      const newMainQ = {
         id: null,
-        display_order: prev.length + i
-      }))
-    ]);
+        section: newQuestions[0]?.section || '',
+        question_type: 'Short Answer', // So it renders its subquestions
+        question_text: mainText,
+        answer_text: '',
+        marks: addedMarks,
+        display_order: questions.length,
+        sub_questions: convertedSubs
+      };
+
+      setQuestions(prev => {
+        const updated = [...prev, newMainQ];
+        // Save the index of the newly added question for subsequent adds in this session
+        setAiSessionMainQIdx(updated.length - 1);
+        return updated;
+      });
+    }
   };
 
   // Sub-questions
@@ -554,8 +804,18 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Class / Standard</label>
-              <input className="form-control" value={className} onChange={e => setClassName(e.target.value)} placeholder={standardName} />
+              <label className="form-label">Class / Standard *</label>
+              <select 
+                className="form-control" 
+                value={className} 
+                onChange={e => setClassName(e.target.value)}
+                required
+              >
+                <option value="">-- Select Class --</option>
+                {filteredStandards.map(std => (
+                  <option key={std.id} value={std.name}>{std.name}</option>
+                ))}
+              </select>
             </div>
             <div className="form-group">
               <label className="form-label">Date</label>
@@ -641,7 +901,7 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
           <div className="card-header">
             <span className="card-title">Questions ({questions.length})</span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-outline btn-sm" onClick={() => setIsAIModalOpen(true)} style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}>
+              <button className="btn btn-outline btn-sm" onClick={handleOpenAISuggestGeneral} style={{ color: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}>
                 <Sparkles size={14} /> Suggest Questions
               </button>
               <button className="btn btn-primary btn-sm" onClick={addQuestion}>
@@ -666,10 +926,10 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                       <select
                         className="form-control"
                         style={{ fontSize: 12.5, padding: '5px 9px' }}
-                        value={q.question_type || 'Short Answer'}
+                        value={q.question_type || (currentBoard === 'GSEB' ? 'Part A: MCQ (1 Mark)' : 'MCQ (1 Mark)')}
                         onChange={e => updateQuestion(idx, 'question_type', e.target.value)}
                       >
-                        {QUESTION_TYPES.map(t => <option key={t}>{t}</option>)}
+                        {currentQuestionTypes.map(t => <option key={t}>{t}</option>)}
                       </select>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                         <label style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Marks:</label>
@@ -693,7 +953,17 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                   {/* Question body */}
                   <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <div className="form-group">
-                      <label className="form-label" style={{ fontSize: 12 }}>Question Text</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <label className="form-label" style={{ fontSize: 12, margin: 0 }}>Question Text</label>
+                        <button
+                          type="button"
+                          className="btn-link"
+                          style={{ fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 4, color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          onClick={() => handleOpenAISuggestForQuestion(idx)}
+                        >
+                          <Sparkles size={11} /> Suggest Question
+                        </button>
+                      </div>
                       <FormattingToolbar
                         textareaId={`q-text-${idx}`}
                         value={q.question_text || ''}
@@ -711,7 +981,17 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label" style={{ fontSize: 12 }}>Section Header (optional, e.g. Section A, Choose the correct options)</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <label className="form-label" style={{ fontSize: 12, margin: 0 }}>Section Header (optional, e.g. Section A, Choose the correct options)</label>
+                        <button
+                          type="button"
+                          className="btn-link"
+                          style={{ fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 4, color: 'var(--color-primary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                          onClick={() => handleOpenAISuggestForSection(idx)}
+                        >
+                          <Sparkles size={11} /> Suggest Header
+                        </button>
+                      </div>
                       <input
                         className="form-control"
                         style={{ fontSize: 12.5 }}
@@ -876,9 +1156,20 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                                   </select>
                                 </div>
                                 
-                                <button className="btn-icon danger" style={{ marginTop: 4 }} onClick={() => removeSubQuestion(idx, si)}>
-                                  <Trash2 size={13} />
-                                </button>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                                  <button
+                                    type="button"
+                                    className="btn-icon"
+                                    style={{ color: 'var(--color-primary)' }}
+                                    title="Suggest Sub-question"
+                                    onClick={() => handleOpenAISuggestForSubQuestion(idx, si)}
+                                  >
+                                    <Sparkles size={13} />
+                                  </button>
+                                  <button className="btn-icon danger" style={{ marginTop: 0 }} onClick={() => removeSubQuestion(idx, si)}>
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -887,13 +1178,23 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
                       </>
                     )}
 
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      style={{ alignSelf: 'flex-start', fontSize: 12, marginTop: 8 }}
-                      onClick={() => addSubQuestion(idx)}
-                    >
-                      <Plus size={12} /> Add Sub-Question
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: 12 }}
+                        onClick={() => addSubQuestion(idx)}
+                      >
+                        <Plus size={12} /> Add Sub-Question
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        style={{ fontSize: 12, color: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                        onClick={() => handleOpenAISuggestForSubQuestions(idx)}
+                      >
+                        <Sparkles size={12} /> Suggest Sub-questions
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -961,7 +1262,21 @@ const PaperEditor = ({ paperId, standardId, standardName, onBack, token, user, s
         token={token}
         showAlert={showAlert}
         paperDetails={{ className, subject }}
+        board={currentBoard}
         onAddQuestions={handleAISuggestionsAdded}
+        targetField={aiTargetField}
+        targetQType={
+          aiTargetField === 'section'
+            ? null
+            : aiTargetField === 'sub_questions'
+            ? (questions[aiTargetQIdx]?.sub_questions?.[0]?.type === 'MCQ' || questions[aiTargetQIdx]?.question_type?.includes('MCQ') ? 'MCQ' : (questions[aiTargetQIdx]?.question_type || 'Short Answer'))
+            : aiTargetSqIdx !== null
+            ? (questions[aiTargetQIdx]?.sub_questions?.[aiTargetSqIdx]?.type === 'MCQ' ? 'MCQ' : 'Short Answer')
+            : aiTargetQIdx !== null
+            ? questions[aiTargetQIdx]?.question_type
+            : null
+        }
+        isMultiAdd={aiTargetQIdx === null || aiTargetField === 'sub_questions'}
       />
     </div>
   );
