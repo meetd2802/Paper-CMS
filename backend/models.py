@@ -7,6 +7,19 @@ try:
 except ImportError:
     from database import Base
 
+class SubscriptionPlan(Base):
+    __tablename__ = "subscription_plans"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    price = Column(Integer, default=0)
+    billing_cycle = Column(String(50), default="monthly") # e.g. "monthly" or "yearly"
+    paper_limit = Column(Integer, default=1)
+    class_limit = Column(Integer, default=1)
+    subject_limit = Column(Integer, default=1)
+    features = Column(JSON, nullable=True) # e.g. ["branding", "live_preview", "ai_suggestions", "smart_scanner", "voice_typing", "teacher_management"]
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
 class User(Base):
     __tablename__ = "users"
     
@@ -18,10 +31,15 @@ class User(Base):
     must_reset_password = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     boards = Column(JSON, nullable=True) # e.g. ["CBSE", "GSEB"]
+    
+    # Subscriptions
+    subscription_plan_id = Column(Integer, ForeignKey("subscription_plans.id", ondelete="SET NULL"), nullable=True)
+    subscription_expires_at = Column(DateTime, nullable=True)
 
     # Relationships
     assignments = relationship("TeacherAssignment", back_populates="teacher", cascade="all, delete-orphan")
     papers = relationship("QuestionPaper", back_populates="creator", cascade="all, delete-orphan")
+    subscription_plan = relationship("SubscriptionPlan")
 
 class Standard(Base):
     __tablename__ = "standards"
@@ -68,7 +86,7 @@ class QuestionPaper(Base):
     date_str = Column(String(100), nullable=True)
     time_duration = Column(String(100), nullable=True)
     max_marks = Column(Integer, default=25)
-    logo_path = Column(String(255), default="/uploads/logo.png")
+    logo_path = Column(String(255), nullable=True)
     instructions = Column(Text, nullable=True)
     structure_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

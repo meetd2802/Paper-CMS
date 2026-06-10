@@ -39,6 +39,21 @@ def create_subject(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    import datetime
+    
+    if current_user.role == "teacher":
+        existing_sub_count = db.query(Subject).filter(Subject.user_id == current_user.id).count()
+        limit = 1 # Free/Trial limit
+        
+        if current_user.subscription_plan and (current_user.subscription_expires_at is None or current_user.subscription_expires_at > datetime.datetime.utcnow()):
+            limit = current_user.subscription_plan.subject_limit
+            
+        if existing_sub_count >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You have reached your subject creation limit ({limit}). Please purchase or upgrade your subscription plan to continue."
+            )
+            
     user_id = current_user.id if current_user.role == "teacher" else None
     db_subj = db.query(Subject).filter(
         Subject.name == subject_in.name,

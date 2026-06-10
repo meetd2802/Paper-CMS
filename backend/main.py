@@ -9,11 +9,11 @@ load_dotenv()
 try:
     from backend.database import engine, Base
     from backend.config import UPLOAD_DIR
-    from backend.routers import auth, standards, papers, questions, uploads, teachers, subjects, ai
+    from backend.routers import auth, standards, papers, questions, uploads, teachers, subjects, ai, subscriptions
 except ImportError:
     from database import engine, Base
     from config import UPLOAD_DIR
-    from routers import auth, standards, papers, questions, uploads, teachers, subjects, ai
+    from routers import auth, standards, papers, questions, uploads, teachers, subjects, ai, subscriptions
 
 # Create DB tables on startup
 Base.metadata.create_all(bind=engine)
@@ -24,7 +24,7 @@ def run_migrations(engine):
     with engine.begin() as connection:
         is_sqlite = engine.dialect.name == "sqlite"
         
-        for column, col_type in [("is_active", "BOOLEAN NOT NULL DEFAULT 1"), ("boards", "JSON NULL")]:
+        for column, col_type in [("is_active", "BOOLEAN NOT NULL DEFAULT 1"), ("boards", "JSON NULL"), ("subscription_plan_id", "INT NULL"), ("subscription_expires_at", "DATETIME NULL")]:
             try:
                 connection.execute(text(f"ALTER TABLE users ADD COLUMN {column} {col_type};"))
                 print(f"Added column {column} to users table")
@@ -83,10 +83,65 @@ def run_migrations(engine):
             except Exception:
                 pass
 
+        # 7. subscription_plans table
+        for column, col_type in [("billing_cycle", "VARCHAR(50) NOT NULL DEFAULT 'monthly'")]:
+            try:
+                connection.execute(text(f"ALTER TABLE subscription_plans ADD COLUMN {column} {col_type};"))
+                print(f"Added column {column} to subscription_plans table")
+            except Exception:
+                pass
+
 try:
     run_migrations(engine)
+    
+    # Seed default subscription plans
+    from backend.database import SessionLocal
+    from backend.models import SubscriptionPlan
+    db = SessionLocal()
+    try:
+        default_plans = [
+            {
+                "name": "Normal",
+                "price": 499,
+                "billing_cycle": "monthly",
+                "paper_limit": 5,
+                "class_limit": 3,
+                "subject_limit": 5,
+                "features": ["branding"]
+            },
+            {
+                "name": "Medium",
+                "price": 999,
+                "billing_cycle": "monthly",
+                "paper_limit": 20,
+                "class_limit": 10,
+                "subject_limit": 20,
+                "features": ["branding", "live_preview", "ai_suggestions"]
+            },
+            {
+                "name": "All Features",
+                "price": 23988,
+                "billing_cycle": "yearly",
+                "paper_limit": 9999,
+                "class_limit": 9999,
+                "subject_limit": 9999,
+                "features": ["branding", "live_preview", "ai_suggestions", "smart_scanner", "voice_typing", "teacher_management"]
+            }
+        ]
+        for plan_data in default_plans:
+            existing = db.query(SubscriptionPlan).filter(SubscriptionPlan.name == plan_data["name"]).first()
+            if not existing:
+                plan = SubscriptionPlan(**plan_data)
+                db.add(plan)
+        db.commit()
+        print("Default subscription plans seeded.")
+    except Exception as e:
+        print("Error seeding subscription plans:", e)
+        db.rollback()
+    finally:
+        db.close()
 except Exception as e:
-    print("Migration run note:", e)
+    print("Migration run note / seed note:", e)
 
 app = FastAPI(
     title="Question Paper CMS API",
@@ -108,6 +163,7 @@ app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # Register routers
 app.include_router(auth.router)
+app.include_router(subscriptions.router)
 app.include_router(standards.router)
 app.include_router(papers.router)
 app.include_router(questions.router)

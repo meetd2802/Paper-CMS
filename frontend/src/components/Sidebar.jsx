@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   LayoutDashboard, Users, BookOpen, LogOut, ChevronDown, ChevronRight,
-  FolderOpen, Plus, Trash2, GraduationCap, User, Lock
+  FolderOpen, Plus, Trash2, GraduationCap, User, Lock, CreditCard
 } from 'lucide-react';
 
 const API = import.meta.env.VITE_API_URL;
@@ -254,13 +254,35 @@ const Sidebar = ({ user, standards, activeTab, activeStandard, onTabChange, onOp
 
             {/* Teachers - admin only */}
             {isAdmin && (
+              <>
+                <button
+                  className={`sidebar-item ${activeTab === 'teachers' ? 'active' : ''}`}
+                  onClick={() => onTabChange('teachers')}
+                  style={{ marginTop: 8 }}
+                >
+                  <Users size={17} />
+                  Teachers
+                </button>
+                <button
+                  className={`sidebar-item ${activeTab === 'subscriptions' ? 'active' : ''}`}
+                  onClick={() => onTabChange('subscriptions')}
+                  style={{ marginTop: 8 }}
+                >
+                  <CreditCard size={17} />
+                  Manage Subscriptions
+                </button>
+              </>
+            )}
+
+            {/* Pricing & Plans - teacher only */}
+            {!isAdmin && (
               <button
-                className={`sidebar-item ${activeTab === 'teachers' ? 'active' : ''}`}
-                onClick={() => onTabChange('teachers')}
+                className={`sidebar-item ${activeTab === 'pricing' ? 'active' : ''}`}
+                onClick={() => onTabChange('pricing')}
                 style={{ marginTop: 8 }}
               >
-                <Users size={17} />
-                Teachers
+                <CreditCard size={17} />
+                Pricing & Plans
               </button>
             )}
           </>
@@ -284,6 +306,11 @@ const Sidebar = ({ user, standards, activeTab, activeStandard, onTabChange, onOp
           <div style={{ fontSize: 13, color: 'white', fontWeight: 600, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {isAdmin ? '👑 Super Admin' : '👤 Teacher'}
           </div>
+          {!isAdmin && (
+            <div style={{ fontSize: 11, color: '#a5b4fc', marginTop: 4, fontWeight: 500 }}>
+              Plan: {user?.subscription_plan ? user.subscription_plan.name : 'Free Trial'}
+            </div>
+          )}
         </div>
         <button className="sidebar-item" style={{ color: '#a5b4fc', marginBottom: 4 }} onClick={onOpenChangePassword}>
           <Lock size={16} /> Change Password

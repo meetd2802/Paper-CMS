@@ -848,3 +848,23 @@ textarea.form-control {
   transform: translateX(20px);
 }
 
+/* ---- Voice Typing Listening Pulse ---- */
+@keyframes listeningPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.listening-pulse {
+  animation: listeningPulse 1.5s infinite;
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+  border-color: #ef4444 !important;
+}
+

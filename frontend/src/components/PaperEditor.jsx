@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ArrowLeft, Save, Plus, Trash2, ArrowUp, ArrowDown,
-  FileText, Key, RefreshCw, Upload, Download, Sparkles
+  FileText, Key, RefreshCw, Upload, Download, Sparkles,
+  Mic, MicOff
 } from 'lucide-react';
 import AISuggestModal from './AISuggestModal';
 
@@ -48,7 +49,7 @@ const GSEB_QUESTION_TYPES = [
 
 const defaultMCQOptions = () => ['', '', '', ''];
 
-const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack, token, user, subjects, activeSubject, showAlert, showConfirm }) => {
+const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack, token, user, subjects, activeSubject, showAlert, showConfirm, prefilledData, onSave, onRedirectToPricing }) => {
   // Metadata
   const [title, setTitle] = useState('');
   const [subject, setSubject] = useState(activeSubject || '');
@@ -57,13 +58,18 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
   const [timeDuration, setTimeDuration] = useState('');
   const [maxMarks, setMaxMarks] = useState(25);
   const [instructions, setInstructions] = useState('');
-  const [logoPath, setLogoPath] = useState('/uploads/logo.png');
+  const [logoPath, setLogoPath] = useState('');
 
   // Spacing layout states
   const [spacingQuestions, setSpacingQuestions] = useState(12);
   const [spacingSubQuestions, setSpacingSubQuestions] = useState(8);
   const [spacingSections, setSpacingSections] = useState(14);
   const [fontSizeBase, setFontSizeBase] = useState(11);
+  const [schoolName, setSchoolName] = useState('');
+  const [showBorder, setShowBorder] = useState(true);
+  const [showHeader, setShowHeader] = useState(true);
+  const [logoAlignment, setLogoAlignment] = useState('right');
+  const [sectionAlignment, setSectionAlignment] = useState('left');
 
   // Questions
   const [questions, setQuestions] = useState([]);
@@ -148,7 +154,7 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
         setTimeDuration(data.time_duration || '');
         setMaxMarks(data.max_marks || 25);
         setInstructions(data.instructions || '');
-        setLogoPath(data.logo_path || '/uploads/logo.png');
+        setLogoPath(data.logo_path || '');
 
         if (data.structure_json) {
           const struct = typeof data.structure_json === 'string' ? JSON.parse(data.structure_json) : data.structure_json;
@@ -156,6 +162,11 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
           if (struct.spacing_sub_questions !== undefined) setSpacingSubQuestions(struct.spacing_sub_questions);
           if (struct.spacing_sections !== undefined) setSpacingSections(struct.spacing_sections);
           if (struct.font_size_base !== undefined) setFontSizeBase(struct.font_size_base);
+          if (struct.school_name !== undefined) setSchoolName(struct.school_name);
+          if (struct.show_border !== undefined) setShowBorder(struct.show_border);
+          if (struct.show_header !== undefined) setShowHeader(struct.show_header);
+          if (struct.logo_alignment !== undefined) setLogoAlignment(struct.logo_alignment);
+          if (struct.section_alignment !== undefined) setSectionAlignment(struct.section_alignment);
         }
 
         // Load questions
@@ -174,6 +185,32 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
     };
     load();
   }, [paperId]);
+
+  // Load prefilled data (from DOCX/PDF upload)
+  useEffect(() => {
+    if (prefilledData && !paperId) {
+      if (prefilledData.title) setTitle(prefilledData.title);
+      if (prefilledData.subject) setSubject(prefilledData.subject);
+      if (prefilledData.class_name) setClassName(prefilledData.class_name);
+      if (prefilledData.date_str) setDateStr(prefilledData.date_str);
+      if (prefilledData.time_duration) setTimeDuration(prefilledData.time_duration);
+      if (prefilledData.max_marks !== undefined) setMaxMarks(prefilledData.max_marks);
+      if (prefilledData.instructions) setInstructions(prefilledData.instructions);
+      
+      if (prefilledData.questions && Array.isArray(prefilledData.questions)) {
+        setQuestions(prefilledData.questions.map((q, idx) => ({
+          id: null,
+          section: q.section || '',
+          question_type: q.question_type || 'Short Answer',
+          question_text: q.question_text || '',
+          answer_text: q.answer_text || '',
+          marks: Number(q.marks) || 1,
+          display_order: idx,
+          sub_questions: q.sub_questions || []
+        })));
+      }
+    }
+  }, [prefilledData, paperId]);
 
   // Auto-fill instructions when subject changes (new paper only)
   useEffect(() => {
@@ -476,7 +513,7 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Upload failed');
-      setLogoPath(data.path);
+      setLogoPath(data.url);
       showAlert('Success', 'Logo uploaded!', 'success');
     } catch (err) {
       showAlert('Error', err.message, 'error');
@@ -508,7 +545,12 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
           spacing_questions: Number(spacingQuestions),
           spacing_sub_questions: Number(spacingSubQuestions),
           spacing_sections: Number(spacingSections),
-          font_size_base: Number(fontSizeBase)
+          font_size_base: Number(fontSizeBase),
+          school_name: schoolName,
+          show_border: showBorder,
+          show_header: showHeader,
+          logo_alignment: logoAlignment,
+          section_alignment: sectionAlignment
         }
       };
 
@@ -520,7 +562,14 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
           body: JSON.stringify(paperPayload),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed to create paper');
+        if (!res.ok) {
+          if (res.status === 403) {
+            showAlert('Limit Reached', data.detail, 'warning');
+            if (onRedirectToPricing) onRedirectToPricing();
+            return;
+          }
+          throw new Error(data.detail || 'Failed to create paper');
+        }
         pid = data.id;
       } else {
         // Update
@@ -577,6 +626,7 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
       }
 
       showAlert('Saved', 'Paper saved successfully!', 'success');
+      if (onSave) onSave(pid);
       // Refresh preview
       setRefreshPreview(v => v + 1);
     } catch (err) {
@@ -624,6 +674,87 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
 
   const FormattingToolbar = ({ textareaId, value, onChange }) => {
     const mathSymbols = ['√', 'π', 'θ', '±', '×', '÷', '≠', '≤', '≥', '²', '³', '1/3', '1/2', '1/4', 'α', 'β', 'γ', 'Δ', '∠', '∴'];
+    const [isListening, setIsListening] = useState(false);
+    const [lang, setLang] = useState('en-US');
+    const recognitionRef = useRef(null);
+
+    useEffect(() => {
+      return () => {
+        if (recognitionRef.current) {
+          recognitionRef.current.abort();
+        }
+      };
+    }, []);
+
+    const toggleListening = () => {
+      const parseDateStr = (dateStr) => {
+        if (!dateStr) return new Date();
+        const normalized = dateStr.endsWith('Z') || dateStr.includes('+') ? dateStr : `${dateStr}Z`;
+        return new Date(normalized);
+      };
+      const isExpired = user?.subscription_expires_at && parseDateStr(user.subscription_expires_at) < new Date();
+      const hasVoiceTyping = user?.role === 'superadmin' || (user?.subscription_plan && !isExpired && user.subscription_plan.features?.includes('voice_typing'));
+      
+      if (!hasVoiceTyping) {
+        showAlert('Upgrade Required', 'Multilingual Voice Typing is only available in the Enterprise (All Features) plan. Please upgrade your subscription to use this feature.', 'info');
+        return;
+      }
+
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert('Speech recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
+        return;
+      }
+
+      if (isListening) {
+        if (recognitionRef.current) {
+          recognitionRef.current.stop();
+        }
+        setIsListening(false);
+      } else {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.lang = lang;
+
+        recognition.onstart = () => {
+          setIsListening(true);
+        };
+
+        recognition.onresult = (event) => {
+          const transcript = event.results[0][0].transcript;
+          const textarea = document.getElementById(textareaId);
+          if (textarea) {
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+            const text = textarea.value;
+            const prefixSpace = (start > 0 && text[start - 1] !== ' ') ? ' ' : '';
+            const suffixSpace = (end < text.length && text[end] !== ' ') ? ' ' : '';
+            const replacement = prefixSpace + transcript + suffixSpace;
+            const newValue = text.substring(0, start) + replacement + text.substring(end);
+            onChange(newValue);
+            setTimeout(() => {
+              textarea.focus();
+              textarea.setSelectionRange(start + replacement.length, start + replacement.length);
+            }, 50);
+          } else {
+            onChange(value ? value + ' ' + transcript : transcript);
+          }
+        };
+
+        recognition.onerror = (event) => {
+          console.error('Speech recognition error:', event.error);
+          setIsListening(false);
+        };
+
+        recognition.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      }
+    };
 
     return (
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4, padding: '4px 6px', background: '#f8fafc', border: '1px solid var(--border-color)', borderBottom: 'none', borderTopLeftRadius: 6, borderTopRightRadius: 6, alignItems: 'center' }}>
@@ -661,6 +792,54 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
         >
           X<sup>a</sup>
         </button>
+        <div style={{ width: 1, height: 16, background: 'var(--border-color)', margin: '0 4px' }} />
+        
+        {/* Voice Typing Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            type="button"
+            className={`btn-xs ${isListening ? 'listening-pulse' : ''}`}
+            onClick={toggleListening}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+              height: 24,
+              padding: '0 8px',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: 11,
+              transition: 'all 0.2s ease'
+            }}
+            title={isListening ? "Stop Voice Typing" : "Start Voice Typing (Speech-to-Text)"}
+          >
+            {isListening ? <MicOff size={11} /> : <Mic size={11} />}
+            {isListening ? 'Listening...' : 'Voice Type'}
+          </button>
+          <select
+            value={lang}
+            onChange={(e) => setLang(e.target.value)}
+            style={{
+              fontSize: 11,
+              padding: '0 4px',
+              borderRadius: 6,
+              border: '1px solid #d1d5db',
+              background: 'white',
+              cursor: 'pointer',
+              height: 24,
+              color: '#374151',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+              outline: 'none'
+            }}
+          >
+            <option value="en-US">EN</option>
+            <option value="hi-IN">HI (हिंदी)</option>
+            <option value="gu-IN">GU (ગુજરાતી)</option>
+          </select>
+        </div>
+
         <div style={{ width: 1, height: 16, background: 'var(--border-color)', margin: '0 4px' }} />
         <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-secondary)', marginRight: 4 }}>Math:</span>
         {mathSymbols.map(sym => (
@@ -711,7 +890,12 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
               spacing_questions: Number(spacingQuestions),
               spacing_sub_questions: Number(spacingSubQuestions),
               spacing_sections: Number(spacingSections),
-              font_size_base: Number(fontSizeBase)
+              font_size_base: Number(fontSizeBase),
+              school_name: schoolName,
+              show_border: showBorder,
+              show_header: showHeader,
+              logo_alignment: logoAlignment,
+              section_alignment: sectionAlignment
             }
           };
 
@@ -743,7 +927,8 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
   }, [
     title, subject, className, dateStr, timeDuration, maxMarks,
     logoPath, instructions, questions, previewType,
-    spacingQuestions, spacingSubQuestions, spacingSections, fontSizeBase
+    spacingQuestions, spacingSubQuestions, spacingSections, fontSizeBase,
+    schoolName, showBorder, showHeader, logoAlignment, sectionAlignment
   ]);
 
   if (loading) {
@@ -793,6 +978,10 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
           </div>
           <div className="card-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+              <label className="form-label">School / Organization Name</label>
+              <input className="form-control" placeholder="e.g. SHIVASHISH WORLD SCHOOL" value={schoolName} onChange={e => setSchoolName(e.target.value)} />
+            </div>
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
               <label className="form-label">Paper Title *</label>
               <input className="form-control" placeholder="e.g. Unit Test 1 - Mathematics" value={title} onChange={e => setTitle(e.target.value)} />
             </div>
@@ -838,6 +1027,14 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
                 </button>
                 {logoPath && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{logoPath.split('/').pop()}</span>}
               </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Logo Alignment</label>
+              <select className="form-control" value={logoAlignment} onChange={e => setLogoAlignment(e.target.value)} disabled={!logoPath}>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
             </div>
             <div className="form-group" style={{ gridColumn: '1 / -1' }}>
               <label className="form-label">Instructions</label>
@@ -892,6 +1089,24 @@ const PaperEditor = ({ paperId, standardId, standardName, standards = [], onBack
                 <span style={{ fontWeight: 600, color: 'var(--color-primary)' }}>{spacingSections}pt</span>
               </label>
               <input type="range" min={4} max={40} value={spacingSections} onChange={e => setSpacingSections(Number(e.target.value))} style={{ width: '100%', accentColor: 'var(--color-primary)' }} />
+            </div>
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+              <label className="form-label">Section Header Alignment</label>
+              <select className="form-control" value={sectionAlignment} onChange={e => setSectionAlignment(e.target.value)}>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+              </select>
+            </div>
+            <div className="form-group" style={{ gridColumn: '1 / -1', display: 'flex', gap: 24, marginTop: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none', color: 'var(--text-primary)' }}>
+                <input type="checkbox" checked={showBorder} onChange={e => setShowBorder(e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--color-primary)', cursor: 'pointer' }} />
+                Show Page Border
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', userSelect: 'none', color: 'var(--text-primary)' }}>
+                <input type="checkbox" checked={showHeader} onChange={e => setShowHeader(e.target.checked)} style={{ width: 16, height: 16, accentColor: 'var(--color-primary)', cursor: 'pointer' }} />
+                Show School Header
+              </label>
             </div>
           </div>
         </div>

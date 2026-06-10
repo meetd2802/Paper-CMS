@@ -153,9 +153,14 @@ def parse_html_to_flowables(html_text: str, style) -> list:
 def draw_page_decorations(canvas, doc):
     canvas.saveState()
     # 1. Page Border (1.0 pt thickness) wrapping at margins x=20, y=20
-    canvas.setStrokeColor(colors.black)
-    canvas.setLineWidth(1.0)
-    canvas.rect(20, 20, 595.27 - 40, 841.89 - 40)
+    show_border = True
+    if hasattr(doc, 'structure_json') and isinstance(doc.structure_json, dict):
+        show_border = doc.structure_json.get("show_border", True)
+        
+    if show_border:
+        canvas.setStrokeColor(colors.black)
+        canvas.setLineWidth(1.0)
+        canvas.rect(20, 20, 595.27 - 40, 841.89 - 40)
     
     # Print the active frame coordinates for debugging
     # print("ACTIVE TEMPLATE FRAME: x1 =", doc.pageTemplate.frames[0]._x1, "width =", doc.pageTemplate.frames[0]._width)
@@ -180,10 +185,9 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     )
     print("DEBUG MARGINS: left =", doc.leftMargin, "right =", doc.rightMargin, "width =", doc.width)
     
-    styles = getSampleStyleSheet()
-    
     # Extracted layout values or defaults
     layout = structure_json or (paper.structure_json if hasattr(paper, 'structure_json') else None) or {}
+    doc.structure_json = layout
     font_size_base = layout.get("font_size_base", 11)
     font_size_title = layout.get("font_size_title", 22)
     font_size_subtitle = layout.get("font_size_subtitle", 14)
@@ -191,6 +195,9 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
     spacing_questions = layout.get("spacing_questions", 12)
     spacing_sub_questions = layout.get("spacing_sub_questions", 8)
     spacing_sections = layout.get("spacing_sections", 14)
+    section_align_str = layout.get("section_alignment", "left")
+    align_map = {"left": 0, "center": 1, "right": 2}
+    section_alignment = align_map.get(section_align_str, 0)
     
     # Base typography (NotoSans/Helvetica to support English, unicode tags for Hindi/Gujarati)
     style_school = ParagraphStyle(
@@ -245,6 +252,7 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
         fontName=BASE_FONT_BOLD,
         fontSize=font_size_base + 1,
         leading=font_size_base + 5,
+        alignment=section_alignment,
     )
     
     style_question = ParagraphStyle(
@@ -295,38 +303,57 @@ def generate_paper_pdf(paper, is_answer_key: bool = False, structure_json: dict 
                 logo_file = p
                 break
                 
+    logo_alignment = layout.get("logo_alignment", "right")
     logo_img = None
     if logo_file:
         try:
             from reportlab.platypus import Image
             logo_img = Image(logo_file, width=65, height=65)
-            logo_img.hAlign = 'RIGHT'
+            logo_img.hAlign = logo_alignment.upper()
         except Exception as img_err:
             print("Error loading logo image:", img_err)
             
-    school_para = Paragraph(process_unicode_tags("SHIVASHISH WORLD SCHOOL"), style_school)
-    # Append " - ANSWER KEY" if is_answer_key is True
+    school_name = layout.get("school_name", "")
+    show_header = layout.get("show_header", True)
     title_text = f"{paper.title} - ANSWER KEY" if is_answer_key else paper.title
-    title_para = Paragraph(process_unicode_tags(title_text), style_title)
     
-    # 3-column layout to center titles perfectly while keeping the logo on the far right
-    # colWidths sum to 523.27pt (A4 width 595.27 - 72pt margins)
-    header_table = Table(
-        [
-            [Spacer(1, 1), [school_para, Spacer(1, 4), title_para], logo_img if logo_img else Spacer(1, 1)]
-        ],
-        colWidths=[65, 393.27, 65]
-    )
-    header_table.hAlign = 'LEFT'
-    header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('LEFTPADDING', (0, 0), (-1, -1), 0),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 0),
-        ('TOPPADDING', (0, 0), (-1, -1), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
-    ]))
-    story.append(header_table)
-    story.append(Spacer(1, 4))
+    if show_header and (school_name or logo_img):
+        school_para = Paragraph(process_unicode_tags(school_name), style_school)
+        title_para = Paragraph(process_unicode_tags(title_text), style_title)
+        
+        if logo_alignment == 'center':
+            if logo_img:
+                story.append(logo_img)
+                story.append(Spacer(1, 6))
+            story.append(school_para)
+            story.append(Spacer(1, 4))
+            story.append(title_para)
+            story.append(Spacer(1, 8))
+        else:
+            # left or right
+            left_flowable = logo_img if (logo_alignment == 'left' and logo_img) else Spacer(1, 1)
+            right_flowable = logo_img if (logo_alignment == 'right' and logo_img) else Spacer(1, 1)
+            
+            header_table = Table(
+                [
+                    [left_flowable, [school_para, Spacer(1, 4), title_para], right_flowable]
+                ],
+                colWidths=[65, 393.27, 65]
+            )
+            header_table.hAlign = 'LEFT'
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+            ]))
+            story.append(header_table)
+            story.append(Spacer(1, 4))
+    else:
+        title_para = Paragraph(process_unicode_tags(title_text), style_school)
+        story.append(title_para)
+        story.append(Spacer(1, 10))
     
     # 2. Metadata Block (A4 border-to-border layout)
     # Row 1: CLASS : <class> (left), SUB : <subject> (center), DATE : <date> (right)

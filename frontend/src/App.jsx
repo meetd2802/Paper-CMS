@@ -10,6 +10,8 @@ import SubjectManagement from './components/SubjectManagement';
 import Signup from './components/Signup';
 import Profile from './components/Profile';
 import ChangePasswordModal from './components/ChangePasswordModal';
+import SubscriptionManagement from './components/SubscriptionManagement';
+import SubscriptionPlansList from './components/SubscriptionPlansList';
 
 
 const API = import.meta.env.VITE_API_URL;
@@ -72,6 +74,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [activeStandard, setActiveStandard] = useState(null);
   const [activePaperId, setActivePaperId] = useState(null);
+  const [prefilledPaperData, setPrefilledPaperData] = useState(null);
   const [activeSubject, setActiveSubject] = useState(null);
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -136,6 +139,27 @@ function App() {
     }
   }, [token]);
 
+  useEffect(() => {
+    if (token) {
+      const params = new URLSearchParams(window.location.search);
+      const paymentStatus = params.get('payment_status');
+      if (paymentStatus) {
+        if (paymentStatus === 'success') {
+          showAlert('Payment Successful', 'Thank you! Your subscription has been successfully updated.', 'success');
+          setActiveTab('pricing');
+          fetchProfile(token);
+        } else if (paymentStatus === 'failed') {
+          showAlert('Payment Failed', 'The payment transaction could not be completed. Please try again.', 'error');
+          setActiveTab('pricing');
+        }
+        
+        // Clean up query parameters from browser URL
+        const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        window.history.replaceState({ path: newUrl }, '', newUrl);
+      }
+    }
+  }, [token]);
+
   const handleLoginSuccess = (newToken) => {
     localStorage.setItem('token', newToken);
     setToken(newToken);
@@ -154,14 +178,16 @@ function App() {
     setActiveTab('class');
   };
 
-  const handleOpenEditor = (paperId, standard) => {
+  const handleOpenEditor = (paperId, standard, prefilledData = null) => {
     setActivePaperId(paperId);
     setActiveStandard(standard);
+    setPrefilledPaperData(prefilledData);
     setActiveTab('editor');
   };
 
   const handleBackFromEditor = () => {
     setActivePaperId(null);
+    setPrefilledPaperData(null);
     setActiveTab('class');
     fetchStandards();
   };
@@ -202,6 +228,15 @@ function App() {
           activeSubject={activeSubject}
           showAlert={showAlert}
           showConfirm={showConfirm}
+          prefilledData={prefilledPaperData}
+          onSave={(pid) => {
+            setActivePaperId(pid);
+            setPrefilledPaperData(null);
+          }}
+          onRedirectToPricing={() => {
+            setActiveTab('pricing');
+            setActivePaperId(null);
+          }}
         />
         <AlertModal alert={alertData} onClose={() => setAlertData(null)} />
         <ConfirmModal confirm={confirmData} onConfirm={handleConfirmYes} onCancel={handleConfirmNo} />
@@ -241,7 +276,7 @@ function App() {
               standard={activeStandard}
               activeSubject={activeSubject}
               onSetSubject={setActiveSubject}
-              onCreatePaper={(std) => handleOpenEditor(null, std)}
+              onCreatePaper={(std, prefilledData) => handleOpenEditor(null, std, prefilledData)}
               onEditPaper={(paperId, std) => handleOpenEditor(paperId, std)}
               token={token}
               user={user}
@@ -249,6 +284,7 @@ function App() {
               showAlert={showAlert}
               showConfirm={showConfirm}
               onBack={handleBackFromClass}
+              onRedirectToPricing={() => setActiveTab('pricing')}
             />
           )}
           {activeTab === 'teachers' && (
@@ -266,6 +302,22 @@ function App() {
               user={user}
               subjects={subjects}
               fetchSubjects={fetchSubjects}
+              showAlert={showAlert}
+              showConfirm={showConfirm}
+            />
+          )}
+          {activeTab === 'pricing' && (
+            <SubscriptionPlansList
+              token={token}
+              user={user}
+              fetchProfile={fetchProfile}
+              showAlert={showAlert}
+            />
+          )}
+          {activeTab === 'subscriptions' && (
+            <SubscriptionManagement
+              token={token}
+              user={user}
               showAlert={showAlert}
               showConfirm={showConfirm}
             />

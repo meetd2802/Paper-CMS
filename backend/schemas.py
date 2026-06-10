@@ -19,6 +19,38 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class SubscriptionPlanCreate(BaseModel):
+    name: str
+    price: int = 0
+    billing_cycle: Optional[str] = "monthly"
+    paper_limit: int = 1
+    class_limit: int = 1
+    subject_limit: int = 1
+    features: Optional[List[str]] = None
+
+class SubscriptionPlanUpdate(BaseModel):
+    name: Optional[str] = None
+    price: Optional[int] = None
+    billing_cycle: Optional[str] = None
+    paper_limit: Optional[int] = None
+    class_limit: Optional[int] = None
+    subject_limit: Optional[int] = None
+    features: Optional[List[str]] = None
+
+class SubscriptionPlanOut(BaseModel):
+    id: int
+    name: str
+    price: int
+    billing_cycle: str
+    paper_limit: int
+    class_limit: int
+    subject_limit: int
+    features: Optional[List[str]] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
 class UserOut(BaseModel):
     id: int
     email: EmailStr
@@ -27,6 +59,9 @@ class UserOut(BaseModel):
     must_reset_password: bool
     is_active: bool = True
     boards: Optional[List[str]] = None
+    subscription_plan_id: Optional[int] = None
+    subscription_expires_at: Optional[datetime] = None
+    subscription_plan: Optional[SubscriptionPlanOut] = None
     
     class Config:
         from_attributes = True
@@ -92,6 +127,9 @@ class TeacherOut(BaseModel):
     must_reset_password: bool
     is_active: bool = True
     boards: Optional[List[str]] = None
+    subscription_plan_id: Optional[int] = None
+    subscription_expires_at: Optional[datetime] = None
+    subscription_plan: Optional[SubscriptionPlanOut] = None
     assignments: List[TeacherAssignmentOut] = []
     
     class Config:
@@ -145,7 +183,7 @@ class QuestionPaperCreate(BaseModel):
     date_str: Optional[str] = None
     time_duration: Optional[str] = None
     max_marks: int = 25
-    logo_path: Optional[str] = "/uploads/logo.png"
+    logo_path: Optional[str] = None
     instructions: Optional[str] = None
     structure_json: Optional[Dict[str, Any]] = None
 

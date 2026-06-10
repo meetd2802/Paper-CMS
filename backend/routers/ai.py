@@ -1,6 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 import os
 import json
+import io
+import pypdf
+import docx
 from pydantic import BaseModel
 from typing import List, Optional
 try:
@@ -27,6 +30,18 @@ def suggest_questions(
     req: AISuggestionRequest,
     current_user: User = Depends(get_current_user)
 ):
+    import datetime
+    # Enforce subscription feature check
+    features = []
+    if current_user.subscription_plan and (current_user.subscription_expires_at is None or current_user.subscription_expires_at > datetime.datetime.utcnow()):
+        features = current_user.subscription_plan.features or []
+        
+    if "ai_suggestions" not in features:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI Question Suggestion is not enabled on your subscription plan. Please upgrade to a Professional (Medium) or Enterprise (All Features) plan to access this feature."
+        )
+
     from dotenv import load_dotenv
     env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
     load_dotenv(dotenv_path=env_path)
@@ -194,4 +209,186 @@ The JSON array should contain objects with the following structure:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate questions: {str(e)}"
+        )
+
+@router.post("/import-paper")
+def import_paper(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    import datetime
+    # Enforce subscription feature check
+    features = []
+    if current_user.subscription_plan and (current_user.subscription_expires_at is None or current_user.subscription_expires_at > datetime.datetime.utcnow()):
+        features = current_user.subscription_plan.features or []
+        
+    if "smart_scanner" not in features:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Smart Paper Scanner (PDF & Word Import) is not enabled on your subscription plan. Please upgrade to the Enterprise (All Features) plan to access this feature."
+        )
+
+    import tempfile
+    
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+    
+    # We load Gemini API Key
+    from dotenv import load_dotenv
+    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    load_dotenv(dotenv_path=env_path)
+    
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Gemini API Key is not configured on the server."
+        )
+
+    genai.configure(api_key=api_key)
+    
+    model = genai.GenerativeModel(
+        'gemini-2.5-flash',
+        generation_config={"response_mime_type": "application/json"}
+    )
+    
+    prompt = """
+You are an expert exam paper structure analyzer.
+Your task is to extract all details from the provided exam paper and structure it into a precise, valid JSON object matching our database format.
+
+### CRITICAL ACCURACY INSTRUCTIONS:
+1. **NO OMISSIONS**: Extract every single question, passage, comprehension paragraph, option, and instruction. Never summarize, shorten, or omit any text.
+2. **COMPREHENSION PASSAGES**: If a question contains a reading passage/comprehension paragraph (very common in language exams like Gujarati, Hindi, English), you MUST include the entire passage text inside the main question's `question_text`.
+3. **SUB-QUESTIONS**: If a question has sub-parts (e.g. 1), 2), 3) or a), b), c)), you MUST extract the full text of each sub-question. Do not just output numbers like "1)" or "a)".
+4. **GUJARATI / HINDI / SANSKRIT SCRIPT**: Ensure perfect unicode reproduction of Indian scripts. Never lose characters or accents.
+5. **MCQ OPTIONS**: Ensure every MCQ option is fully extracted into the `sub_questions` (as type: "MCQ") or `options` array.
+6. **NO SHORTENING**: Ensure no question content is replaced with placeholders like "..." or "same as above". Extract everything in full.
+
+Your output MUST be a JSON object with the following exact keys:
+1. "title": The title of the question paper (e.g., "Class X English Unit Test 1", "Quarterly Exam - Mathematics"). If not clearly defined, construct a descriptive title.
+2. "subject": The subject name (e.g. "English", "Mathematics", "Science", "Gujarati", "Hindi").
+3. "class_name": The standard or class name (e.g., "Class 10", "Class IX").
+4. "max_marks": The maximum marks as an integer. Default to 25 if not found.
+5. "time_duration": The time duration as a string. Optional/null if not found.
+6. "date_str": The date of the exam as a string. Optional/null if not found.
+7. "instructions": The general instructions for students, formatted in clean HTML. You may use simple lists (<ul>, <ol>, <li>) or paragraph tags (<p>).
+8. "questions": An array of questions present in the paper. Order them exactly as they appear in the original text.
+
+Each question object in the "questions" array MUST have:
+- "section": The section or part header if present (e.g., "SECTION A", "PART B", "Choose the correct option:"). If the question falls under a section, fill this with that section header.
+- "question_type": The type of question. Use standard type names like "MCQ", "Short Answer", "Long Answer", "True/False", "Letter Writing", etc.
+- "question_text": The main text of the question (and the reading passage/comprehension text if applicable). HTML tags like <b>, <i>, <sup>, <sub>, and simple math symbols are allowed. If the question has a prefix like "Q1.", remove the "Q1." prefix as the renderer handles numbering automatically, but preserve the core question text.
+- "answer_text": If the text contains the answer key or solutions, extract the correct option/answer text here. Otherwise, leave it as an empty string.
+- "marks": The marks allocated to this question as an integer.
+- "sub_questions": A list of sub-parts or options if it is an MCQ, or if the question contains sub-questions (e.g. Q1 has sub-questions (a), (b), (c)).
+  Each sub-question object in this list MUST have:
+  - "text": The sub-question text or the MCQ option text. If it is an MCQ option, just place the option content (e.g., "Paris").
+  - "answer": The answer key/option solution if found.
+  - "type": "MCQ" if it is an option of a multiple choice question, or "text" for regular sub-questions.
+  - "options": For MCQ-type sub-questions, this is not needed or can be an empty array. If a sub-question itself is an MCQ, specify its options as an array of 4 strings. Otherwise, provide an empty array [].
+  - "marks": Marks allocated to this sub-question.
+
+IMPORTANT instructions for Gujarati/Hindi content:
+- If the text is in Hindi/Sanskrit, preserve the Devanagari script.
+- If the text is in Gujarati, preserve the Gujarati script.
+
+Return ONLY the valid JSON object. Do not include markdown wraps like ```json.
+"""
+
+    file_bytes = file.file.read()
+    
+    if ext == ".pdf":
+        local_text = ""
+        try:
+            pdf_file = io.BytesIO(file_bytes)
+            reader = pypdf.PdfReader(pdf_file)
+            text_pages = []
+            for page in reader.pages:
+                text_pages.append(page.extract_text() or "")
+            local_text = "\n".join(text_pages).strip()
+        except Exception:
+            pass
+            
+        if len(local_text) > 120:
+            try:
+                # Send raw text to Gemini (takes only 3-5 seconds!)
+                response = model.generate_content([
+                    f"Here is the text extracted from the PDF:\n\n{local_text}\n\n{prompt}"
+                ])
+                text_response = response.text.strip()
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to analyze PDF text with Gemini: {str(e)}"
+                )
+        else:
+            try:
+                # Fall back to visual processing (takes 15-25 seconds but handles images/scans)
+                response = model.generate_content([
+                    {
+                        "mime_type": "application/pdf",
+                        "data": file_bytes
+                    },
+                    prompt
+                ])
+                text_response = response.text.strip()
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to visually analyze PDF with Gemini: {str(e)}"
+                )
+    elif ext in [".docx", ".doc"]:
+        # DOCX: extract text locally and send to Gemini
+        try:
+            docx_file = io.BytesIO(file_bytes)
+            doc = docx.Document(docx_file)
+            text_parts = []
+            for p in doc.paragraphs:
+                text_parts.append(p.text)
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        text_parts.append(cell.text)
+            content = "\n".join(text_parts)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to parse DOCX file: {str(e)}"
+            )
+            
+        if not content.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not extract any text from the uploaded file."
+            )
+            
+        try:
+            response = model.generate_content([
+                f"Here is the text extracted from the document:\n\n{content}\n\n{prompt}"
+            ])
+            text_response = response.text.strip()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to analyze DOCX with Gemini: {str(e)}"
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported file format. Please upload a PDF or DOCX file."
+        )
+
+    try:
+        # Cleanup markdown formatting wraps if returned
+        if text_response.startswith("```json"):
+            text_response = text_response[7:]
+        if text_response.endswith("```"):
+            text_response = text_response[:-3]
+            
+        paper_data = json.loads(text_response.strip())
+        return paper_data
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to parse Gemini JSON output: {str(e)}"
         )

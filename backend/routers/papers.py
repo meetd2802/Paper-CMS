@@ -149,6 +149,22 @@ def create_paper(
             detail="SuperAdmin is restricted from viewing or managing question papers."
         )
         
+    import datetime
+    
+    # Enforce paper limits
+    existing_papers_count = db.query(QuestionPaper).filter(QuestionPaper.created_by == current_user.id).count()
+    limit = 1 # Free/Trial limit
+    
+    # Check if they have an active subscription
+    if current_user.subscription_plan and (current_user.subscription_expires_at is None or current_user.subscription_expires_at > datetime.datetime.utcnow()):
+        limit = current_user.subscription_plan.paper_limit
+        
+    if existing_papers_count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You have reached your paper creation limit ({limit}). Please purchase or upgrade your subscription plan to continue creating question papers."
+        )
+        
     std = db.query(Standard).filter(Standard.id == paper_in.standard_id).first()
     if not std:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Standard not found")

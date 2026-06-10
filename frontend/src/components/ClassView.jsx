@@ -3,9 +3,96 @@ import { Plus, FileText, Trash2, Edit, Download, ArrowLeft, Eye } from 'lucide-r
 
 const API = import.meta.env.VITE_API_URL;
 
-const ClassView = ({ standard, activeSubject, onSetSubject, onCreatePaper, onEditPaper, token, user, subjects, showAlert, showConfirm, onBack }) => {
+const ClassView = ({ standard, activeSubject, onSetSubject, onCreatePaper, onEditPaper, token, user, subjects, showAlert, showConfirm, onBack, onRedirectToPricing }) => {
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = React.useRef(null);
+
+  const checkPaperLimit = async () => {
+    if (user?.role === 'superadmin') return true;
+
+    let limit = 1;
+    if (user?.subscription_plan) {
+      const expiresAt = user.subscription_expires_at;
+      const isActive = !expiresAt || new Date(expiresAt) > new Date();
+      if (isActive) {
+        limit = user.subscription_plan.paper_limit;
+      }
+    }
+
+    try {
+      const res = await fetch(`${API}/papers`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error('Failed to fetch paper count');
+      const allPapers = await res.json();
+      if (allPapers.length >= limit) {
+        showAlert(
+          'Limit Reached',
+          `You have reached your paper creation limit (${limit}). Please purchase or upgrade your subscription plan to continue creating question papers.`,
+          'warning'
+        );
+        if (onRedirectToPricing) {
+          onRedirectToPricing();
+        }
+        return false;
+      }
+      return true;
+    } catch (err) {
+      showAlert('Error', 'Unable to verify paper limit. Please try again.', 'error');
+      return false;
+    }
+  };
+
+  const handleImportClick = async () => {
+    const allowed = await checkPaperLimit();
+    if (allowed) {
+      fileInputRef.current?.click();
+    }
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext !== 'pdf' && ext !== 'docx') {
+      showAlert('Invalid File', 'Please upload a PDF or DOCX file.', 'warning');
+      return;
+    }
+
+    const allowed = await checkPaperLimit();
+    if (!allowed) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setImporting(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch(`${API}/ai/import-paper`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to scan paper');
+      }
+
+      showAlert('Success', 'Paper scanned successfully! Prefilling editor...', 'success');
+      onCreatePaper(standard, data);
+    } catch (err) {
+      showAlert('Import Error', err.message, 'error');
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const isAdmin = user?.role === 'superadmin';
 
@@ -79,9 +166,30 @@ const ClassView = ({ standard, activeSubject, onSetSubject, onCreatePaper, onEdi
             <p className="page-subtitle">Manage question papers for this class</p>
           </div>
         </div>
-        <button className="btn btn-primary" onClick={() => onCreatePaper(standard)}>
-          <Plus size={16} /> New Paper
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            style={{ display: 'none' }} 
+            accept=".pdf,.docx" 
+            onChange={handleFileChange} 
+          />
+          <button className="btn btn-outline" onClick={handleImportClick} disabled={importing}>
+            {importing ? <span className="spinner dark" /> : <Plus size={16} />} Import & Scan Paper
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={async () => {
+              const allowed = await checkPaperLimit();
+              if (allowed) {
+                onCreatePaper(standard);
+              }
+            }}
+            disabled={importing}
+          >
+            <Plus size={16} /> New Paper
+          </button>
+        </div>
       </div>
 
       {/* Subject filter tabs */}
@@ -172,6 +280,17 @@ const ClassView = ({ standard, activeSubject, onSetSubject, onCreatePaper, onEdi
           </div>
         )}
       </div>
+      {importing && (
+        <div className="modal-overlay" style={{ zIndex: 1000, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)' }}>
+          <div style={{ textAlign: 'center', color: 'white' }}>
+            <span className="spinner" style={{ width: 40, height: 40, border: '3px solid white', borderTopColor: 'transparent', display: 'inline-block' }} />
+            <h3 style={{ marginTop: 16, fontSize: 16, fontWeight: 600 }}>Scanning & Parsing Paper with AI…</h3>
+            <p style={{ marginTop: 8, fontSize: 13, color: 'rgba(255, 255, 255, 0.6)', maxWidth: 320, margin: '8px auto 0 auto' }}>
+              Gemini is reading the uploaded document to extract questions, sections, marks, and layout settings.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

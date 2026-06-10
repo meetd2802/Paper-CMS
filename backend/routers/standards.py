@@ -34,6 +34,21 @@ def create_standard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    import datetime
+    
+    if current_user.role == "teacher":
+        existing_std_count = db.query(Standard).filter(Standard.user_id == current_user.id).count()
+        limit = 1 # Free/Trial limit
+        
+        if current_user.subscription_plan and (current_user.subscription_expires_at is None or current_user.subscription_expires_at > datetime.datetime.utcnow()):
+            limit = current_user.subscription_plan.class_limit
+            
+        if existing_std_count >= limit:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"You have reached your class/standard creation limit ({limit}). Please purchase or upgrade your subscription plan to continue."
+            )
+            
     # Check if standard already exists for this user and board
     user_id = current_user.id if current_user.role == "teacher" else None
     db_std = db.query(Standard).filter(
